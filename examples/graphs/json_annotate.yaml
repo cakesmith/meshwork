@@ -1,0 +1,33 @@
+execution:
+  defaultExecutor: kotlin-script
+  executors:
+    - id: kotlin-script
+      kind: kotlin-process
+      extensions: [".kts"]
+      contract: JSON
+places:
+  - id: source
+    type: STRING
+  - id: sink
+    type: STRING
+transitions:
+  - id: annotate
+    inputs:
+      - id: message
+        type: STRING
+    outputs:
+      - id: message
+        type: STRING
+    logic:
+      path: examples/logic/annotate_json.kts
+arcs:
+  - from: source
+    to: annotate
+    toPort: message
+  - from: annotate
+    fromPort: message
+    to: sink
+initialMarking:
+  source:
+    - hello
+

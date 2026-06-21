@@ -1,0 +1,33 @@
+execution:
+  defaultExecutor: kotlin-script
+  executors:
+    - id: kotlin-script
+      kind: kotlin-process
+      extensions: [".kts"]
+      contract: TEXT
+places:
+  - id: source
+    type: STRING
+  - id: sink
+    type: STRING
+transitions:
+  - id: uppercase
+    inputs:
+      - id: input
+        type: STRING
+    outputs:
+      - id: output
+        type: STRING
+    logic:
+      path: examples/logic/uppercase.kts
+arcs:
+  - from: source
+    to: uppercase
+    toPort: input
+  - from: uppercase
+    fromPort: output
+    to: sink
+initialMarking:
+  source:
+    - hello meshwork
+

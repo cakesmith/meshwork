@@ -1,0 +1,7 @@
+graph: examples/graphs/fanout_object.yaml
+mode: UNTIL_IDLE
+expect:
+  upperSink:
+    - HELLO MESHWORK
+  lowerSink:
+    - hello meshwork

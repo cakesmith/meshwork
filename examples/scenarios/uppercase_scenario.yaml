@@ -1,0 +1,5 @@
+graph: examples/graphs/uppercase.yaml
+mode: UNTIL_IDLE
+expect:
+  sink:
+    - HELLO MESHWORK
