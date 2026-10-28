@@ -1,29 +1,21 @@
-# Tech Context
+# Technical Context
 
-## Stack
-- Kotlin/JVM
-- Gradle wrapper pinned to 9.5.1
-- Jackson YAML + JSON for parsing and data exchange
-- JDK built-in `com.sun.net.httpserver.HttpServer` for HTTP place protocols
-- Kotlin JSR223 scripting for `.kts` execution inside a dedicated worker JVM
-- JUnit 5 and Kotlin test for verification
-- Metrics implementation should stay dependency-free and use JDK timing/file/http primitives unless a future collector makes that impossible.
+## Verified stack (2026-10-28)
+- Module: `example.com/meshwork-prototype`.
+- Language baseline: Go 1.23 (`go.mod`).
+- Installed toolchain: `go1.27.3 windows/amd64`.
+- Standard library only; no go.sum, external packages, or package manager required.
+- Windows/PowerShell; gcc is available for the Go race detector.
+- Graph definitions and executable graphs serialize through encoding/json; timeout durations serialize as integer nanoseconds.
 
-## Build Strategy
-- `build.ps1` is a thin wrapper around the checked-in `gradlew.bat`.
-- The helper sets `GRADLE_USER_HOME` to the repo-local cache and forwards requested tasks.
-- Gradle caches stay repo-local through `.gradle-user-home/`.
-- The current machine verification path runs successfully on Java 25.
-- Windows `.exe` packaging uses the JDK's built-in `jpackage` via `.\build.ps1 packageWindowsExe`.
-- The packaged app image lands in `build\jpackage\meshwork\`, with the launcher at `build\jpackage\meshwork\meshwork.exe`.
+## Commands
+```powershell
+go test ./...
+go vet ./...
+go test -race ./...
+go run ./cmd/demo
+```
 
-## Runtime Assumptions
-- The current machine has Java available.
-- External transition logic files are repo-relative.
-- The runtime now supports built-in `kotlin-process` plus generic wrapper-driven `process` executors.
-- Wrapper commands are argv arrays, not shell strings; supported placeholders are `{logicPath}`, `{projectRoot}`, `{java}`, and `{classpath}`.
-- Persistent worker reuse is limited to the current `run` invocation or `run --server` session.
-- Metrics collection should be cheap enough to leave on in development by timing around transition execution with `System.nanoTime()`.
-- YAML and JSON enum parsing is case-insensitive, so protocol kinds such as `http`, `stdin`, and `stdout` can stay lowercase in config.
-- Server mode binds HTTP to `127.0.0.1:8080` by default and can move to another host/port through CLI flags.
-- The Windows app image bundles a private Java runtime, so end users do not need a separate system JRE to run `meshwork.exe`.
+The initial run succeeded with the default cache, but a subsequent command hit access denied under `C:\Users\nicks\AppData\Local\go-build`. Verification uses a workspace-local cache via `$env:GOCACHE = Join-Path (Get-Location) '.cache/go-build'`. This is an execution-environment setting, not a project dependency. `.cache/.gitignore` ignores generated cache contents. For ordinary use, a writable cache under `$env:TEMP` also works.
+
+The historical Go 1.22.3/toolchain-download warning is resolved. No Go language-version change was needed.

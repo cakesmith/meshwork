@@ -1,140 +1,60 @@
 # Meshwork
 
-Meshwork is a minimal Petri-net execution scaffold for building, running, and debugging typed token flows. The first version focuses on:
+A standard-library Go prototype for strictly 1-safe, typed Petri nets. The current milestone composes OR from reusable NAND architectures through explicit token fan-out. Meshwork remains independent of Collator.
 
-- YAML-authored graphs
-- Typed places, ports, and arcs
-- Place-level boundary protocols for `stdin`, `stdout`, and `http`
-- External transition logic files with executor dispatch by file type
-- A small CLI for validation, simulation, and scenario checks
+## Run
 
-## Commands
-
-Use the repo-local build helper so Gradle runs through the checked-in wrapper with a repo-local cache:
+Go 1.23 or later:
 
 ```powershell
-.\build.ps1 test
-.\build.ps1 run --args="--help"
-.\build.ps1 run --args="validate examples\graphs\uppercase.yaml"
-.\build.ps1 run --args="run examples\graphs\uppercase.yaml --trace"
-.\build.ps1 run --args="run examples\graphs\uppercase.yaml --flamegraph build\metrics\uppercase.folded"
-.\build.ps1 run --args="run examples\graphs\uppercase.yaml --initial-file override.yaml"
-.\build.ps1 run --args="run examples\graphs\uppercase.yaml --server"
-.\build.ps1 run --args="run examples\graphs\uppercase.yaml --server --http -http --http-port 8080"
-.\build.ps1 run --args="scenario examples\scenarios\uppercase_scenario.yaml"
-.\build.ps1 run --args="scenario examples\scenarios\fanout_object_scenario.yaml"
+go test ./...
+go vet ./...
+go test -race ./...
+go run ./cmd/demo
 ```
 
-The CLI help text is generated from the command definitions, so `meshwork --help`, `meshwork run --help`, and running the CLI with no arguments all stay in sync automatically.
+The demo runs all four OR inputs. Each execution fires two duplication transitions and three NAND transitions. For example, `true OR false = true (5 transitions)`. The race detector requires a supported C compiler.
 
-## Place Protocols
+If sandbox permissions prevent writing the default Go build cache, use a writable cache before these commands:
 
-Places can opt into boundary protocols directly:
-
-```yaml
-places:
-  - id: source
-    type: STRING
-    protocol:
-      kind: http
-      path: /ingest
-      awaitOutputs: [result]
-  - id: result
-    type: STRING
-    protocol:
-      kind: http
+```powershell
+$env:GOCACHE = Join-Path $env:TEMP 'meshwork-go-build'
 ```
 
-Protocol rules:
+## Representation and composition
 
-- Unconfigured source-only places default to `stdin` in server mode.
-- Unconfigured sink-only places default to `stdout` in server mode.
-- `--http` or `-http` overlays `http` onto every unconfigured place.
-- Explicit place protocol config wins over inferred defaults or the HTTP overlay.
+- `meshwork/core.go`: typed places, immutable content-addressed tokens, marking, and atomic firing.
+- `meshwork/graph.go`: graph definitions, entities, architecture references, deterministic name resolution, composition, and flattening.
+- `meshwork/logic.go`: NAND and duplication primitives; NOT and OR composed as ordinary graphs.
+- `cmd/demo`: executes the flattened OR graph for all four input combinations.
 
-Server mode behavior:
+`Graph` declares typed places and named architecture references with explicit port bindings. An `Entity` declares ordered typed inputs/outputs. An `Architecture` implements an entity using either a Go implementation key or another graph. Functions live in a separate implementation registry; graphs, libraries, and flattened executable graphs serialize with `encoding/json`.
 
-- Single `stdin` place: one non-empty input line becomes one token.
-- Multiple `stdin` places: one JSON object per line shaped like `{placeId:[tokens...]}`.
-- Single `stdout` place: one output token per line.
-- Multiple `stdout` places: one JSON object per event shaped like `{placeId:[tokens...]}`.
-- HTTP `POST` injects tokens into an HTTP-bound place.
-- HTTP `GET` drains queued tokens from an HTTP-bound place.
-- If an HTTP input place declares `awaitOutputs`, `POST` waits up to `--timeout-ms` for those places and returns their drained tokens.
-
-## External Logic
-
-Transitions reference external logic files through graph executor config. There are now two execution lanes:
-
-- `kotlin-process`: compatibility and prototyping lane for `.kts` logic
-- `process`: generic wrapper-driven lane for repo-local scripts, long-lived workers, compiled jars, or native binaries
-
-`kotlin-process` logic still exposes:
-
-```kotlin
-fun run(input: String): Any?
+```go
+library, implementations := meshwork.LogicLibrary()
+flat, err := library.Compose("/logic", meshwork.ORGraph())
+if err != nil { return err }
+runtime, err := flat.Instantiate(implementations)
 ```
 
-The runtime handles contract encoding:
+`Compose` joins graph declarations and flattens them. Relative names resolve under the supplied namespace; absolute names stay absolute. Each explicitly named reference supplies the scope for its internal relative names. Bindings connect its interface places to declared, type-compatible places in the referring graph. Internal elements can use absolute names to share identities across scopes. File layout has no role in identity.
 
-- `text`: ordered port values over stdin/stdout as newline-delimited text
-- `json`: named inputs/outputs as JSON text
+Equal resolved names unify compatible place or atomic transition declarations. Different names stay independent. Conflicts, malformed names, duplicate arcs, missing bindings, incompatible types, missing implementations, and recursive architecture expansion are errors. No place-to-place or transition-to-transition arc can be represented: transition endpoints must name declared places. Flattened places/transitions and definition trace paths are sorted, independent of declaration order. Source paths are metadata, never computational edges.
 
-If a single output port fans out to multiple places, the script can still return one value to duplicate everywhere, or return an object keyed by destination place id. See `examples/graphs/fanout_object.yaml` and `examples/scenarios/fanout_object_scenario.yaml`.
+NOT consumes one input through a duplicator, producing equal immutable token references in two distinct places. NAND then consumes both. OR composes two such NOT architectures and one final NAND. Only the NAND primitive evaluates a Boolean expression; OR is graph composition. The example's firing loop is limited to this acyclic graph and is not a general scheduler.
 
-### Generic Process Wrappers
+## Firing guarantees
 
-`process` executors use a wrapper block:
+A place holds zero or one token reference. Every attempt atomically reserves all inputs and locks all outputs while preserving the marking. Competing consumers cannot reserve those inputs, and competing producers cannot claim locked outputs. Output locks alone never enable consumers. An actual unreserved input is consumable regardless of its output lock.
 
-```yaml
-execution:
-  defaultExecutor: process-wrapper
-  executors:
-    - id: process-wrapper
-      kind: process
-      extensions: [".logic"]
-      wrapper:
-        command: ["powershell", "-ExecutionPolicy", "Bypass", "-File", "wrapper/echo.ps1", "{logicPath}"]
-        mode: PERSISTENT
-        timeoutMs: 30000
-```
+Success atomically consumes all inputs and produces all outputs. Failure, panic, cancellation, invalid output, or finite timeout releases reservations without committing that attempt, then calls optional `OnError`. A self-loop consumes and replaces its own token. Initially full output places block producers, except for a transition's own input/output self-loop. No partial reservation is acquired.
 
-Useful command placeholders:
+Omitted atomic timeout (`0`) means infinite. Finite timeout revokes commit authority and returns even if underlying work ignores cancellation; late results cannot commit. Such work may continue running and retain a goroutine. Adapters/implementations remain responsible for stopping work and reconciling external effects. Retry/backoff is not a kernel policy. Set `OnError` before concurrent execution; no default handler policy has been selected.
 
-- `{logicPath}`: resolved path to the transition logic file
-- `{projectRoot}`: normalized project root
-- `{java}`: current JVM binary
-- `{classpath}`: current Meshwork classpath
+Tokens hash a type tag, a zero separator, and normalized JSON using SHA-256. Object keys are sorted, including struct/RawMessage input, and bytes are copied at API boundaries. `Put` and firing validate canonical bytes/hash and declared token type. Types are nominal tags, not JSON schema validators. Numbers preserve their JSON spelling (`1` and `1.0` differ); cross-language numeric canonicalization remains open. New object normalization can change older struct token hashes; this prototype has no persistent store to migrate.
 
-The generic process worker protocol is one compact JSON line per request and response:
+## Open boundaries and next step
 
-- Request: `{"id":"...", "inputs":{...}}` for JSON contracts
-- Response: `{"id":"...", "outputs":{...}}`
+Place-based subgraph traversal/closure policies, immutable definition revision storage, language-independent token canonicalization, and default error handling remain undecided. Composite architecture timeouts are rejected: lowering a whole-graph deadline to individual transitions would change semantics. Entities currently require nonempty inputs and outputs with distinct port names; self-loops bind separate input/output ports to the same place.
 
-For hot paths, prefer one of these:
-
-- `wrapper.mode: PERSISTENT` for long-lived interpreter or service workers
-- compiled jars/binaries behind the same `process` wrapper shape when startup cost matters more than scripting convenience
-
-The intended path is: prototype in `.kts`, then promote frequently invoked logic to a persistent worker or compiled wrapper when latency matters.
-
-## Metrics
-
-Transition traces now include `durationMs=...` for each firing. For reusable outputs, configure metrics plugins under `execution.metrics`:
-
-```yaml
-execution:
-  metrics:
-    plugins:
-      - kind: prometheus
-        path: /metrics
-      - kind: flamegraph
-        output: build/metrics/transitions.folded
-```
-
-Current built-ins:
-
-- `prometheus`: exposes scrape-friendly text on the existing server-mode HTTP listener
-- `flamegraph`: writes folded-stack samples that tools such as `flamegraph.pl` can render later
-
-You can also force a one-off folded output from the CLI with `run --flamegraph <repo-relative-path>`.
+Next smallest milestone: specify and test place-based subgraph selection with transition closure and typed boundaries. There is no separate Slice model. GraphML/yEd layout round-tripping, Mermaid import/export, cloud adapters, persistence, UI, and Collator are deferred.

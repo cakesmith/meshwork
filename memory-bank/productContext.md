@@ -1,18 +1,9 @@
 # Product Context
 
-## Why This Exists
-Meshwork is intended to make temporal coordination and data flow explicit through a Petri net substrate. Typed places and arcs provide a way to validate token movement, while explicit transition logic keeps compute flexible.
+Meshwork aims to describe, compose, compile, execute, observe, and evolve software through one computational graph model. Collator will eventually reconstruct books using Meshwork, but book-specific functionality must remain separate and waits until composition/execution foundations are sound.
 
-## User Workflow
-1. Author a graph in YAML.
-2. Attach transition logic through external files.
-3. Validate graph structure and type compatibility.
-4. Run the graph with optional tracing for debugging.
-5. Capture small end-to-end checks with scenario files.
+The current developer workflow is Go definitions -> explicit name/port bindings -> validated flattened graph -> implementation registry -> runtime -> seed marking -> fire transitions -> inspect tokens/snapshots. Graph serialization excludes functions and layout. The OR demo exercises reusable architectures, rather than hardcoding an OR implementation.
 
-## Design Intent
-- Minimal scaffolding first
-- Explicit data flow over hidden runtime magic
-- Flexible compute boundaries through executor abstraction
-- Easy future expansion to new external logic file types
+Inputs are consumed, never implicitly read or shared as electronic signals. Explicit duplication produces tokens in separate 1-safe places. Failed attempts preserve their original marking; runtime errors are reported through an optional callback. Arbitrary external effects cannot be rolled back by marking atomicity.
 
+Subgraphs are graphs, and slice means subgraph; no separate Slice semantics. Future authoring prioritizes yEd/GraphML, with Mermaid as another external representation. Canonical graph semantics must stabilize before full layout-preserving round-tripping.
