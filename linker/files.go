@@ -23,6 +23,10 @@ type Repository struct {
 	Name, Root, Namespace string
 }
 
+type repositoryManifest struct {
+	Repositories map[string]string `yaml:"repositories"`
+}
+
 type File struct {
 	Path, Kind, Name string
 	Repository       Repository
@@ -34,17 +38,26 @@ var scenarioFile = regexp.MustCompile(`^[^.]+\.(scenarios?)\.([^.]+)\.meshwork\.
 // Discover returns sorted, absolute paths. Symlink directories are not followed.
 func Discover(repos []Repository) ([]File, error) {
 	var files []File
-	seen := map[string]bool{}
+	seen := map[string]string{}
 	roots := map[string]string{}
-	for _, repo := range repos {
-		if repo.Name == "" || strings.ContainsAny(repo.Name, "/\\: .\t\n") || seen[repo.Name] {
+	pending := append([]Repository(nil), repos...)
+	for len(pending) > 0 {
+		repo := pending[0]
+		pending = pending[1:]
+		if repo.Name == "" || strings.ContainsAny(repo.Name, "/\\: .\t\n") {
 			return nil, fmt.Errorf("invalid or duplicate repository name %q", repo.Name)
 		}
-		seen[repo.Name] = true
 		root, err := filepath.Abs(repo.Root)
 		if err != nil {
 			return nil, err
 		}
+		if old, ok := seen[repo.Name]; ok {
+			if old == root {
+				continue
+			}
+			return nil, fmt.Errorf("invalid or duplicate repository name %q", repo.Name)
+		}
+		seen[repo.Name] = root
 		repo.Root = root
 		if old := roots[root]; old != "" {
 			return nil, fmt.Errorf("repository root %s shared by %s and %s", root, old, repo.Name)
@@ -55,6 +68,40 @@ func Discover(repos []Repository) ([]File, error) {
 		}
 		if _, err := resolveName(repo.Namespace, repo.Name); err != nil {
 			return nil, err
+		}
+		dependencies, err := discoverRepositoryDependencies(repo)
+		if err != nil {
+			return nil, err
+		}
+		for _, dependency := range dependencies {
+			dependency.Namespace = repo.Namespace
+			dependencyRoot, err := filepath.Abs(dependency.Root)
+			if err != nil {
+				return nil, err
+			}
+			if old, ok := seen[dependency.Name]; ok {
+				if old == dependencyRoot {
+					continue
+				}
+				return nil, fmt.Errorf("invalid or duplicate repository name %q", dependency.Name)
+			}
+			alreadyQueued := false
+			for _, queued := range pending {
+				queuedRoot, err := filepath.Abs(queued.Root)
+				if err != nil {
+					return nil, err
+				}
+				if queued.Name == dependency.Name {
+					if queuedRoot == dependencyRoot {
+						alreadyQueued = true
+						break
+					}
+					return nil, fmt.Errorf("invalid or duplicate repository name %q", dependency.Name)
+				}
+			}
+			if !alreadyQueued {
+				pending = append(pending, dependency)
+			}
 		}
 		info, err := os.Stat(root)
 		if err != nil {
@@ -94,6 +141,44 @@ func Discover(repos []Repository) ([]File, error) {
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, nil
+}
+
+func discoverRepositoryDependencies(repo Repository) ([]Repository, error) {
+	p := filepath.Join(repo.Root, "meshwork.repositories.yaml")
+	b, err := os.ReadFile(p)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var manifest repositoryManifest
+	decoder := yaml.NewDecoder(bytes.NewReader(b))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&manifest); err != nil {
+		return nil, fmt.Errorf("%s: %w", p, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("%s: expected one YAML document", p)
+	}
+	names := make([]string, 0, len(manifest.Repositories))
+	for name := range manifest.Repositories {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	dependencies := make([]Repository, 0, len(names))
+	for _, name := range names {
+		root := manifest.Repositories[name]
+		if root == "" {
+			return nil, fmt.Errorf("%s: repository %q has an empty path", p, name)
+		}
+		if !filepath.IsAbs(root) {
+			root = filepath.Join(repo.Root, root)
+		}
+		dependencies = append(dependencies, Repository{Name: name, Root: root})
+	}
+	return dependencies, nil
 }
 
 // duration accepts graph/scenario durations in Go notation, or explicit infinite.
@@ -140,6 +225,8 @@ type scenario struct {
 	Clock   clockSpec      `yaml:"clock"`
 	Steps   []scenarioStep `yaml:"steps"`
 	Name    string         `yaml:"name"`
+	Input   string         `yaml:"input"`
+	Output  string         `yaml:"output"`
 	Marking map[string]any `yaml:"marking"`
 	Expect  map[string]any `yaml:"expect"`
 }
@@ -154,6 +241,8 @@ type document struct {
 	References  []reference           `yaml:"references"`
 	Graph       string                `yaml:"graph"`
 	Name        string                `yaml:"name"`
+	Input       string                `yaml:"input"`
+	Output      string                `yaml:"output"`
 	Marking     map[string]any        `yaml:"marking"`
 	Expect      map[string]any        `yaml:"expect"`
 	Scenarios   []scenario            `yaml:"scenarios"`
@@ -224,7 +313,7 @@ func parse(f File) (*source, error) {
 	allowed := map[string]bool{}
 	keys := "namespace bindings places transitions arcs references"
 	if f.Kind != "graph" {
-		keys = "namespace bindings graph name marking expect clock steps"
+		keys = "namespace bindings graph name input output marking expect clock steps"
 		if f.Kind == "scenarios" {
 			keys = "namespace bindings graph scenarios clock"
 		}

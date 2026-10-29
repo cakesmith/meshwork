@@ -10,7 +10,15 @@
 ## Formats and execution
 Only graph.<name>.meshwork.yaml and <purpose>.scenario[s].<name>.meshwork.yaml authoring files. GraphML import is opt-in. Strict YAML rejects unknown fields and scenarios cannot redefine computation. Entity/architecture fields/properties no longer exist semantically. `implementation`/`meshwork.implementation` is an opaque caller-supplied `map[string]Compute` key, conventionally named for an adjacent consumer source file, never a relative source-file reference.
 
+`meshwork.repositories.yaml` is an optional repository-root manifest with `repositories: {name: relative/path}`. Discovery loads listed roots recursively before linking; dependency paths resolve from their declaring root, retain the specified repository name, and inherit the caller's parent namespace. It supplies graph dependencies only and does not load implementation source files.
+
 Consumer implementation files are ordinary Go packages placed beside their graph YAML. They import `meshwork` to implement `Compute`; a consumer-owned package composes their functions into the `map[string]Compute` passed to `Instantiate` or `RunScenario`. Meshwork does not dynamically load `.go` files, so the YAML implementation value remains a registry key rather than a Go import path.
+
+The `meshwork execute --scenario FILE` CLI command is wired only to the included `examples/distributed` consumer registry. It links its configured repositories, selects all scenarios whose source is exactly FILE, runs each through `linker.RunScenario`, and prints `passed: NAME`. It returns an error for an undiscovered file, unknown implementation key, or failed scenario; it is not a plugin mechanism for arbitrary consumers.
+
+A singular scenario can instead be a shell-friendly adapter using `input: stdin` and `output: PLACE`. It reads one bounded YAML mapping from stdin as the complete initial marking, validates its keys and typed token construction against the selected graph, runs without an `expect`, and writes the selected final token's canonical JSON payload to stdout. Input/output files use ordinary shell redirection; Meshwork YAML contains no host paths. This mode is limited to the CLI and the bundled distributed registry.
+
+When `execute --scenario FILE` has no positional root or `--repo`, the CLI walks upward from FILE and uses the nearest directory containing `meshwork.repositories.yaml` as its root. This is limited to a declared boundary; projects without that manifest still provide an explicit root or repository flags.
 
 `meshwork` contains no shipped Boolean implementation registry. The distributed consumer example supplies `logic.nand.go` and `logic.duplicate.go`; the demo links its YAML and uses that example's registry. Core tests use private `_test.go` fixtures.
 

@@ -1,13 +1,16 @@
 package linker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"time"
 
 	"example.com/meshwork-prototype/meshwork"
+	"gopkg.in/yaml.v3"
 )
 
 type Scenario struct {
@@ -15,6 +18,9 @@ type Scenario struct {
 	Marking, Expect     map[string]meshwork.Token
 	Clock               ClockSpec
 	Steps               []Step
+	Input, Output       string
+	inputNamespace      string
+	inputBindings       map[string]string
 }
 
 type ClockSpec struct {
@@ -41,7 +47,7 @@ func resolveScenarios(s *source, ns string, g meshwork.ExecutableGraph) ([]Scena
 	location := s.loc("scenarios", "")
 	cases := s.Doc.Scenarios
 	if s.File.Kind == "scenario" {
-		cases = []scenario{{Name: s.Doc.Name, Marking: s.Doc.Marking, Expect: s.Doc.Expect, Clock: s.Doc.Clock, Steps: s.Doc.Steps}}
+		cases = []scenario{{Name: s.Doc.Name, Input: s.Doc.Input, Output: s.Doc.Output, Marking: s.Doc.Marking, Expect: s.Doc.Expect, Clock: s.Doc.Clock, Steps: s.Doc.Steps}}
 	}
 	if len(cases) == 0 {
 		return nil, fmt.Errorf("%s: scenario collection must not be empty", s.loc("scenarios", ""))
@@ -72,7 +78,25 @@ func resolveScenarios(s *source, ns string, g meshwork.ExecutableGraph) ([]Scena
 			return nil, fmt.Errorf("%s: scenario steps require a manual clock", location)
 		}
 		seen[c.Name] = true
-		item := Scenario{Clock: config, Name: c.Name, Graph: ns, Source: location, Marking: map[string]meshwork.Token{}, Expect: map[string]meshwork.Token{}}
+		if c.Input != "" || c.Output != "" {
+			if s.File.Kind != "scenario" || c.Input != "stdin" || c.Output == "" || c.Marking != nil || c.Expect != nil {
+				return nil, fmt.Errorf("%s: stdin scenarios require singular input: stdin, output: PLACE, and no marking or expect", location)
+			}
+		}
+		item := Scenario{Clock: config, Name: c.Name, Graph: ns, Source: location, Marking: map[string]meshwork.Token{}, Expect: map[string]meshwork.Token{}, Input: c.Input}
+		if c.Input == "stdin" {
+			item.inputNamespace, item.inputBindings = ns, s.Doc.Bindings
+		}
+		if c.Output != "" {
+			n, err := boundName(&local, c.Output)
+			if err != nil {
+				return nil, fmt.Errorf("%s: scenario %s: %w", location, c.Name, err)
+			}
+			if types[n] == "" {
+				return nil, fmt.Errorf("%s: scenario %s references unknown output place %s", location, c.Name, n)
+			}
+			item.Output = n
+		}
 		for i, values := range []map[string]any{c.Marking, c.Expect} {
 			target := item.Marking
 			if i == 1 {
@@ -141,6 +165,56 @@ func resolveScenarios(s *source, ns string, g meshwork.ExecutableGraph) ([]Scena
 		result = append(result, item)
 	}
 	return result, nil
+}
+
+const maxScenarioInput = 1 << 20
+
+// WithStdinMarking validates one YAML mapping and returns a scenario with that marking.
+func WithStdinMarking(s Scenario, g meshwork.ExecutableGraph, in io.Reader) (Scenario, error) {
+	if s.Input != "stdin" {
+		return Scenario{}, fmt.Errorf("scenario %s does not accept stdin", s.Name)
+	}
+	b, err := io.ReadAll(io.LimitReader(in, maxScenarioInput+1))
+	if err != nil {
+		return Scenario{}, err
+	}
+	if len(b) > maxScenarioInput {
+		return Scenario{}, fmt.Errorf("scenario stdin exceeds %d bytes", maxScenarioInput)
+	}
+	values := map[string]any{}
+	d := yaml.NewDecoder(bytes.NewReader(b))
+	if err := d.Decode(&values); err != nil {
+		return Scenario{}, fmt.Errorf("scenario stdin must be a YAML mapping: %w", err)
+	}
+	var extra any
+	if err := d.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return Scenario{}, errors.New("scenario stdin must contain one YAML document")
+		}
+		return Scenario{}, err
+	}
+	types := map[string]string{}
+	for _, p := range g.Places {
+		types[p.Name] = p.Type
+	}
+	local := source{NS: s.inputNamespace, Doc: document{Bindings: s.inputBindings}}
+	s.Marking = map[string]meshwork.Token{}
+	for _, key := range sortedKeys(values) {
+		name, err := boundName(&local, key)
+		if err != nil {
+			return Scenario{}, err
+		}
+		typ := types[name]
+		if typ == "" {
+			return Scenario{}, fmt.Errorf("scenario stdin references unknown place %s", name)
+		}
+		token, err := meshwork.NewToken(typ, values[key])
+		if err != nil {
+			return Scenario{}, fmt.Errorf("scenario stdin place %s: %w", name, err)
+		}
+		s.Marking[name] = token
+	}
+	return s, nil
 }
 
 // RunScenario runs a finite example on an isolated marking. Each transition fires

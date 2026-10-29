@@ -51,6 +51,33 @@ func TestConflictsHaltOutput(t *testing.T) {
 	}
 }
 
+func TestExecuteScenarioFile(t *testing.T) {
+	var out bytes.Buffer
+	err := run([]string{"execute", "--scenario", "../../examples/distributed/composites/tests/tests.scenarios.mux.meshwork.yaml"}, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(out.String(), "passed: "); got != 8 {
+		t.Fatalf("got %d results: %s", got, out.String())
+	}
+	if err := run([]string{"execute", "-repo", "primitives=../../examples/distributed/primitives"}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "requires --scenario") {
+		t.Fatal("execute accepted no scenario", err)
+	}
+}
+
+func TestExecuteStdinScenario(t *testing.T) {
+	var out bytes.Buffer
+	err := runInput([]string{"execute", "--scenario", "../../examples/distributed/composites/run.scenario.nand.meshwork.yaml"}, strings.NewReader("{A: true, B: true}\n"), &out)
+	if err != nil || out.String() != "false\n" {
+		t.Fatalf("output %q, error %v", out.String(), err)
+	}
+	for _, input := range []string{"{A: true, extra: false}", "- true", "{A: true}\n---\n{B: true}"} {
+		if err := runInput([]string{"execute", "--scenario", "../../examples/distributed/composites/run.scenario.nand.meshwork.yaml"}, strings.NewReader(input), &bytes.Buffer{}); err == nil {
+			t.Fatal("accepted invalid stdin", input)
+		}
+	}
+}
+
 func TestGraphMLCommands(t *testing.T) {
 	fixture := "../../linker/testdata/graphml/graph.nand.graphml"
 	for _, args := range [][]string{

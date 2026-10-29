@@ -11,9 +11,21 @@ go test ./...
 go vet ./...
 go test -race ./...
 go run ./examples/distributed/demo
-go run ./cmd/meshwork validate ./examples/distributed/primitives ./examples/distributed/composites
+go run ./cmd/meshwork validate ./examples/distributed/composites
+
+go run ./cmd/meshwork execute --scenario ./examples/distributed/composites/tests/tests.scenarios.mux.meshwork.yaml
 go run ./cmd/meshwork validate ./examples/timing
 ```
+
+Build the CLI and run its stdin/stdout NAND adapter with ordinary shell redirection:
+
+```powershell
+go build -o meshwork.exe ./cmd/meshwork
+'{A: true, B: true}' | .\meshwork.exe execute --scenario ./examples/distributed/composites/run.scenario.nand.meshwork.yaml
+# false
+```
+
+That singular scenario declares `input: stdin` and `output: Q`. Stdin must be one YAML mapping of known graph places; its final `Q` token is written as canonical JSON to stdout. Invalid input or execution failure exits nonzero and emits no result token.
 
 The demo prints all four correct OR results, using two duplication and three NAND transitions. Distributed validation reports 42 places, 23 transitions and 17 NAND/OR/MUX scenarios; timing validation reports 3 places, 1 transition and 2 scenarios. CLI validation never executes implementation code. Tests execute the scenarios through the Go API. The race detector requires a supported C compiler.
 
@@ -26,7 +38,7 @@ $env:GOMODCACHE = Join-Path (Get-Location) '.cache/go-mod'
 
 ## Representation and composition
 
-`meshwork.Graph` contains typed places, atomic transition definitions and optional graph references with explicit namespace/name bindings. `ExecutableGraph` is an alias for this same representation. `Library.Graphs` holds ordinary graph definitions; implementation functions live separately in `map[string]Compute`. There are no entity or architecture contracts/registries.
+`meshwork.Graph` contains typed places, atomic transition definitions and optional graph references with explicit namespace/name bindings. `ExecutableGraph` is an alias for this same representation. `Library.Graphs` holds ordinary graph definitions; implementation functions live separately in `map[string]Compute`.
 
 ```go
 linked, err := linker.Link([]linker.Repository{

@@ -3,9 +3,11 @@
 Run from the project root with Go 1.23 or later:
 
 ```powershell
-go run ./cmd/meshwork discover ./examples/distributed/primitives ./examples/distributed/composites
-go run ./cmd/meshwork link ./examples/distributed/primitives ./examples/distributed/composites
-go run ./cmd/meshwork validate ./examples/distributed/primitives ./examples/distributed/composites
+go run ./cmd/meshwork discover ./examples/distributed/composites
+go run ./cmd/meshwork link ./examples/distributed/composites
+go run ./cmd/meshwork validate ./examples/distributed/composites
+
+go run ./cmd/meshwork execute --scenario ./examples/distributed/composites/tests/tests.scenarios.mux.meshwork.yaml
 go test ./...
 ```
 
@@ -15,7 +17,7 @@ MUX selects A when S is false and B when S is true: `Q = (A AND NOT S) OR (B AND
 
 `TestIndependentDiscoveryUnifies` discovers two repositories separately and passes their combined file lists to `LinkFiles`: compatible declarations share identities and duplicate arcs collapse. Type, implementation, and node-kind conflicts return an empty result with deterministic diagnostics naming both sources, leaving source bytes unchanged. CLI tests require both `link` and `validate` to emit no output when linking fails.
 
-For a single repository, use `meshwork discover ./workspace`, `meshwork link ./workspace`, or `meshwork validate ./workspace` after building with `go build -o meshwork.exe ./cmd/meshwork`. `link` emits canonical `meshwork.ExecutableGraph` JSON; `validate` checks structure and scenario references without executing implementation code. It cannot check whether an implementation key has a registered function. All commands return a nonzero exit status on errors.
+For a single repository, use `meshwork discover ./workspace`, `meshwork link ./workspace`, or `meshwork validate ./workspace` after building with `go build -o meshwork.exe ./cmd/meshwork`. `link` emits canonical `meshwork.ExecutableGraph` JSON; `validate` checks structure and scenario references without executing implementation code. `execute --scenario FILE` runs the selected source file's scenarios against the included distributed-example registry and prints one `passed: NAME` result per scenario. It cannot load arbitrary consumer Go implementations; unknown keys fail at instantiation. All commands return a nonzero exit status on errors.
 
 ## Discovery and repository context
 
@@ -27,7 +29,7 @@ Only these filename forms are discovered, recursively:
 
 The name and purpose each occupy one filename component. Other files are ignored; `.git` and `.cache` directories are skipped. Directory symlinks are not followed; matching source-file symlinks are rejected. Paths are sorted before parsing. Every source is collected before resolving references. Duplicate YAML keys, unknown fields, multiple YAML documents, and singular/plural schema mismatches are errors.
 
-Each configured root is one repository. Positional roots use the directory basename as the repository name. Names must be unique. To assign names and a parent namespace explicitly, put flags before positional roots:
+Each configured root is one repository. Positional roots use the directory basename as the repository name. Names must be unique. A root can declare named relative dependencies in `meshwork.repositories.yaml`; they are discovered recursively using the declared names. `execute --scenario FILE` without a root walks upward from FILE to this manifest and uses that directory. To assign names and a parent namespace explicitly, put flags before positional roots:
 
 ```powershell
 go run ./cmd/meshwork validate -namespace /projects/logic -repo primitives=./examples/distributed/primitives -repo composites=./examples/distributed/composites
@@ -103,7 +105,24 @@ scenarios:
 
 The singular form uses top-level `graph`, `name`, `marking`, and optional `expect`, with no `scenarios` field. Scenario names must be nonempty and unique within their file. Place names in markings and expectations resolve in the selected graph's namespace, with optional file `bindings`. Every place must belong to that graph. Duplicate resolved marking/expectation keys fail. Values become immutable tokens with the declared nominal type; Meshwork does not infer conversions or validate value schemas.
 
-Scenarios can live in any configured repository. They never become reusable graph declarations. Execute them with an explicit implementation registry:
+A singular scenario can be a shell adapter instead of a fixed test case:
+
+```yaml
+graph: logic.nand
+name: example
+input: stdin
+output: Q
+```
+
+`input: stdin` requires `output: PLACE` and forbids fixed `marking` and `expect`. The process reads one YAML mapping from stdin, validates every name against the selected graph and constructs its token with that place's declared type. The final selected token is emitted as its canonical JSON payload on stdout; redirect either stream to use a file. Bad YAML, multiple documents, unknown places, oversized input, stalled computation, or a missing output token is an error, so the process exits nonzero without a successful output value.
+
+Scenarios can live in any configured repository. They never become reusable graph declarations. The included distributed example can execute a selected scenario source file through the CLI:
+
+```powershell
+go run ./cmd/meshwork execute --scenario ./examples/distributed/composites/tests/tests.scenarios.mux.meshwork.yaml
+```
+
+Other consumers execute scenarios with their explicit implementation registry:
 
 ```go
 linked, err := linker.Link([]linker.Repository{

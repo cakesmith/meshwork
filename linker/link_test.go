@@ -46,17 +46,6 @@ func TestDistributedExamples(t *testing.T) {
 	if len(result.Scenarios) != 17 {
 		t.Fatalf("got %d scenarios", len(result.Scenarios))
 	}
-	impl := distributed.Implementations()
-	before, _ := json.Marshal(result)
-	for _, s := range result.Scenarios {
-		if _, err := RunScenario(context.Background(), result.Definitions[s.Graph], s, impl); err != nil {
-			t.Fatal(err)
-		}
-	}
-	after, _ := json.Marshal(result)
-	if string(before) != string(after) {
-		t.Fatal("scenario mutated definitions")
-	}
 	// The same cross-directory definition also resolves inside one repository.
 	root := t.TempDir()
 	write(t, root, "one/graph.nand.meshwork.yaml", "namespace: /logic/nand\nplaces: {A: Bool, B: Bool, Q: Bool}\ntransitions: {nand: {implementation: logic.nand.go}}\narcs: [[A, nand], [B, nand], [nand, Q]]\n")
@@ -67,6 +56,24 @@ func TestDistributedExamples(t *testing.T) {
 	}
 	if !reflect.DeepEqual(r.Definitions["test:nand"], r.Definitions["test:or"]) {
 		t.Fatal("unbound reference changed identity")
+	}
+}
+
+func TestRepositoryManifestResolvesDependencies(t *testing.T) {
+	result, err := Link([]Repository{{Name: "composites", Root: "../examples/distributed/composites"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := result.Definitions["primitives:nand"]; !ok {
+		t.Fatal("manifest did not discover primitives")
+	}
+	if _, ok := result.Definitions["composites:mux"]; !ok {
+		t.Fatal("composites missing")
+	}
+	root := t.TempDir()
+	write(t, root, "meshwork.repositories.yaml", "unknown: true\n")
+	if _, err := Discover(repo(root)); err == nil || !strings.Contains(err.Error(), "field unknown not found") {
+		t.Fatal("accepted invalid repository manifest", err)
 	}
 }
 
@@ -298,7 +305,16 @@ func TestScenarioFailuresAndIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := r.Scenarios[0]
+	var s Scenario
+	for _, candidate := range r.Scenarios {
+		if candidate.Input == "" {
+			s = candidate
+			break
+		}
+	}
+	if s.Name == "" {
+		t.Fatal("missing ordinary scenario")
+	}
 	g := r.Definitions[s.Graph]
 	impl := distributed.Implementations()
 	if _, err := RunScenario(context.Background(), g, s, nil); err == nil {

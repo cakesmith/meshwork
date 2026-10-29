@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	distributed "example.com/meshwork-prototype/examples/distributed"
 	"example.com/meshwork-prototype/linker"
 )
 
@@ -30,15 +32,35 @@ func (r *repositories) Set(v string) error {
 	return nil
 }
 
-func run(args []string, out io.Writer) error {
+func scenarioRepositoryRoot(scenario string) (string, error) {
+	p, err := filepath.Abs(scenario)
+	if err != nil {
+		return "", err
+	}
+	for root := filepath.Dir(p); ; root = filepath.Dir(root) {
+		if _, err := os.Stat(filepath.Join(root, "meshwork.repositories.yaml")); err == nil {
+			return root, nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			return "", fmt.Errorf("no repository manifest above scenario %s; provide a root or --repo", p)
+		}
+	}
+}
+
+func run(args []string, out io.Writer) error { return runInput(args, os.Stdin, out) }
+
+func runInput(args []string, in io.Reader, out io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: meshwork discover|link|validate|import [options] [ROOT|FILE ...]; meshwork diff BEFORE AFTER [--format text|json] [--yed]")
+		return fmt.Errorf("usage: meshwork discover|link|validate|import [options] [ROOT|FILE ...]; meshwork execute --scenario FILE [options]; meshwork diff BEFORE AFTER [--format text|json] [--yed]")
 	}
 	command := args[0]
 	if command == "diff" {
 		return runDiff(args[1:], out)
 	}
-	if command != "discover" && command != "link" && command != "validate" && command != "import" {
+	if command != "discover" && command != "link" && command != "validate" && command != "import" && command != "execute" {
 		return fmt.Errorf("unknown command %q", command)
 	}
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
@@ -50,13 +72,14 @@ func run(args []string, out io.Writer) error {
 	flags.Var(&graphMLRoots, "graphml-root", "opt-in GraphML discovery root (repeatable)")
 	yed := flags.Bool("yed", false, "infer computational kinds from yEd ellipse/rectangle and names from labels")
 	format := flags.String("format", "", "canonical link/import output: json or yaml (import defaults to summary)")
+	scenario := flags.String("scenario", "", "scenario source file to execute")
 	// Permit flags after a filename as well as before it.
 	var options, positional []string
 	for i := 1; i < len(args); i++ {
 		a := args[i]
 		if strings.HasPrefix(a, "-") {
 			options = append(options, a)
-			if !strings.Contains(a, "=") && (a == "-repo" || a == "--repo" || a == "-namespace" || a == "--namespace" || a == "-graphml-root" || a == "--graphml-root" || a == "-format" || a == "--format") && i+1 < len(args) {
+			if !strings.Contains(a, "=") && (a == "-repo" || a == "--repo" || a == "-namespace" || a == "--namespace" || a == "-graphml-root" || a == "--graphml-root" || a == "-format" || a == "--format" || a == "-scenario" || a == "--scenario") && i+1 < len(args) {
 				i++
 				options = append(options, args[i])
 			}
@@ -69,6 +92,9 @@ func run(args []string, out io.Writer) error {
 	}
 	if *format != "" && *format != "json" && *format != "yaml" {
 		return fmt.Errorf("unsupported format %q", *format)
+	}
+	if command == "execute" && *scenario == "" {
+		return fmt.Errorf("execute requires --scenario FILE")
 	}
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
@@ -151,6 +177,13 @@ func run(args []string, out io.Writer) error {
 		}
 		repos = append(repos, linker.Repository{Name: filepath.Base(absolute), Root: absolute})
 	}
+	if command == "execute" && len(repos) == 0 {
+		root, err := scenarioRepositoryRoot(*scenario)
+		if err != nil {
+			return err
+		}
+		repos = append(repos, linker.Repository{Name: filepath.Base(root), Root: root})
+	}
 	if len(repos) == 0 {
 		absolute, err := filepath.Abs(".")
 		if err != nil {
@@ -193,6 +226,52 @@ func run(args []string, out io.Writer) error {
 	result, err := linker.LinkFiles(files)
 	if err != nil {
 		return err
+	}
+	if command == "execute" {
+		target, err := filepath.Abs(*scenario)
+		if err != nil {
+			return err
+		}
+		matched := false
+		stdio := false
+		for _, s := range result.Scenarios {
+			if !strings.HasPrefix(s.Source, target+":") {
+				continue
+			}
+			matched = true
+			if s.Input == "stdin" {
+				if stdio {
+					return fmt.Errorf("stdin scenario file must contain exactly one scenario")
+				}
+				stdio = true
+				var err error
+				s, err = linker.WithStdinMarking(s, result.Definitions[s.Graph], in)
+				if err != nil {
+					return err
+				}
+			}
+			runtime, err := linker.RunScenario(context.Background(), result.Definitions[s.Graph], s, distributed.Implementations())
+			if err != nil {
+				return err
+			}
+			if s.Output != "" {
+				token, ok := runtime.Token(s.Output)
+				if !ok {
+					return fmt.Errorf("scenario %s produced no token at output %s", s.Name, s.Output)
+				}
+				if _, err := fmt.Fprintln(out, string(token.Data)); err != nil {
+					return err
+				}
+				continue
+			}
+			if _, err := fmt.Fprintf(out, "passed: %s\n", s.Name); err != nil {
+				return err
+			}
+		}
+		if !matched {
+			return fmt.Errorf("scenario file was not discovered: %s", target)
+		}
+		return nil
 	}
 	return emit(result)
 }
