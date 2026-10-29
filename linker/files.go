@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"example.com/meshwork-prototype/meshwork"
 	"gopkg.in/yaml.v3"
@@ -95,22 +96,56 @@ func Discover(repos []Repository) ([]File, error) {
 	return files, nil
 }
 
+// duration accepts graph/scenario durations in Go notation, or explicit infinite.
+type duration time.Duration
+
+func parseDuration(s string) (time.Duration, error) {
+	if s == "infinite" || s == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("invalid nonnegative duration %q", s)
+	}
+	return d, nil
+}
+func (d *duration) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind != yaml.ScalarNode || n.Tag != "!!str" || n.Value == "" {
+		return fmt.Errorf("duration must be a string")
+	}
+	v, err := parseDuration(n.Value)
+	*d = duration(v)
+	return err
+}
+func (d duration) MarshalYAML() (any, error) { return time.Duration(d).String(), nil }
+
 type transition struct {
-	Implementation string `yaml:"implementation"`
-	Architecture   string `yaml:"architecture,omitempty"`
-	Entity         string `yaml:"entity,omitempty"`
+	Implementation string   `yaml:"implementation"`
+	Timeout        duration `yaml:"timeout,omitempty"`
 }
 type reference struct {
 	Graph     string            `yaml:"graph"`
 	Namespace string            `yaml:"namespace"`
 	Bindings  map[string]string `yaml:"bindings"`
 }
+type clockSpec struct {
+	Type  string        `yaml:"type"`
+	Start time.Duration `yaml:"start"`
+}
+type scenarioStep struct {
+	AdvanceClock *time.Duration `yaml:"advance_clock"`
+	Expect       map[string]any `yaml:"expect"`
+}
 type scenario struct {
+	Clock   clockSpec      `yaml:"clock"`
+	Steps   []scenarioStep `yaml:"steps"`
 	Name    string         `yaml:"name"`
 	Marking map[string]any `yaml:"marking"`
 	Expect  map[string]any `yaml:"expect"`
 }
 type document struct {
+	Clock       clockSpec             `yaml:"clock"`
+	Steps       []scenarioStep        `yaml:"steps"`
 	Namespace   string                `yaml:"namespace"`
 	Bindings    map[string]string     `yaml:"bindings"`
 	Places      map[string]string     `yaml:"places"`
@@ -189,9 +224,9 @@ func parse(f File) (*source, error) {
 	allowed := map[string]bool{}
 	keys := "namespace bindings places transitions arcs references"
 	if f.Kind != "graph" {
-		keys = "namespace bindings graph name marking expect"
+		keys = "namespace bindings graph name marking expect clock steps"
 		if f.Kind == "scenarios" {
-			keys = "namespace bindings graph scenarios"
+			keys = "namespace bindings graph scenarios clock"
 		}
 	}
 	for _, k := range strings.Fields(keys) {
@@ -263,17 +298,9 @@ func resolveName(ns, name string) (string, error) {
 	return "/" + strings.Join(parts, "/"), nil
 }
 
-func implementation(file, value string) (string, error) {
+func implementation(value string) (string, error) {
 	if value == "" {
 		return "", fmt.Errorf("implementation is required")
-	}
-	if strings.HasPrefix(value, "./") || strings.HasPrefix(value, "../") {
-		p, symbol, has := strings.Cut(value, "#")
-		p = filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(file), filepath.FromSlash(p))))
-		if has {
-			p += "#" + symbol
-		}
-		return p, nil
 	}
 	return value, nil
 }

@@ -1,41 +1,39 @@
 # Technical Context
 
-## Semantic diff additions (2026-10-28)
-- No dependency or Go version changes. linker.Diff compares ExecutableGraph; DiffResults adds Result.Sources. Report JSON uses typed values and stable semanticChanges/provenanceChanges/possibleRenames arrays; text uses Report.WriteText.
-- CLI: go run ./cmd/meshwork diff BEFORE AFTER --format text|json [--yed]. Files may be GraphML/YAML; directories discover both formats under stable repository name workspace. Named multi-repository comparisons use existing discovery/linking APIs, then DiffResults. Successful differences exit zero; invalid inputs fail without a report.
-- Final checks use existing .cache/go-build and .cache/go-mod after default-cache access denied: go test ./..., go vet ./..., go test -race ./..., CLI text/JSON smoke checks and git diff --check. Scale regression uses 3000 places/2999 transitions; no performance benchmark claim.
+## Verified stack
+- Module example.com/meshwork-prototype; Go baseline 1.23 in go.mod.
+- Installed Go 1.27.3 windows/amd64, verified 2026-10-29.
+- Go modules with direct pinned gopkg.in/yaml.v3 v3.0.1; kernel/composition use standard library. No new dependency or runtime version changes.
+- Windows PowerShell; gcc is available for race detection.
+- Use workspace-local GOCACHE=.cache/go-build and GOMODCACHE=.cache/go-mod when sandbox default-cache permissions fail. Both are populated. Preserve the pre-existing untracked .cache directory.
 
-## GraphML additions (2026-10-28)
-- No new dependencies or runtime changes: Go encoding/xml, encoding/json, existing yaml.v3.
-- XML limits: 8 MiB/file, 100000 elements, nesting depth 128; UTF-8 with optional BOM. DOCTYPE/directives and unknown entities fail; no external entity resolver. Require standard GraphML namespaces. Computational edges must be directed; hyperedges and computational GraphML ports unsupported.
-- Commands: `go run ./cmd/meshwork import ./linker/testdata/graphml/graph.nand.graphml`, `validate` with the same path, `import FILE --format yaml`, and `link ROOT --graphml-root DIAGRAM_ROOT`. Repeat discovery roots as needed; `--yed` explicitly enables shape/label inference. JSON import output includes diagnostics and raw XML/provenance; default import output is a summary.
-- API: ImportGraphML(filename, conventions), DiscoverGraphML(repositories, conventions), LinkFiles(combinedFiles), CanonicalJSON(linked.Graph), CanonicalYAML(linked.Graph). YAML-only Discover/Link remain opt-out of GraphML.
-- Test/vet/race, original demo, GraphML CLI smoke checks and existing 17 distributed scenarios pass with workspace-local GOCACHE/GOMODCACHE. Default-cache compilation attempted a blocked module-cache network request; using the already populated local caches resolved it without downloads or dependency edits.
-- Real yEd save/reopen remains unverified; fixtures are hand-authored in yEd format. File contract resolution and perfect round-trip synchronization remain deferred. YAML export rejects timeout/remapped-port information it cannot retain.
+## Formats and execution
+Only graph.<name>.meshwork.yaml and <purpose>.scenario[s].<name>.meshwork.yaml authoring files. GraphML import is opt-in. Strict YAML rejects unknown fields and scenarios cannot redefine computation. Entity/architecture fields/properties no longer exist semantically. `implementation`/`meshwork.implementation` is an opaque caller-supplied `map[string]Compute` key, conventionally named for an adjacent consumer source file, never a relative source-file reference.
 
-## Verified stack (2026-10-28)
-- Module: `example.com/meshwork-prototype`.
-- Language baseline: Go 1.23 (`go.mod`).
-- Installed toolchain: `go1.27.3 windows/amd64`.
-- Kernel/composition use the standard library. The linker imports `gopkg.in/yaml.v3 v3.0.1` directly, pinned in go.mod/go.sum; Go modules manage dependencies.
-- Windows/PowerShell; gcc is available for the Go race detector.
-- Graph definitions and executable graphs serialize through encoding/json; timeout durations serialize as integer nanoseconds.
+Consumer implementation files are ordinary Go packages placed beside their graph YAML. They import `meshwork` to implement `Compute`; a consumer-owned package composes their functions into the `map[string]Compute` passed to `Instantiate` or `RunScenario`. Meshwork does not dynamically load `.go` files, so the YAML implementation value remains a registry key rather than a Go import path.
 
-## Commands
+`meshwork` contains no shipped Boolean implementation registry. The distributed consumer example supplies `logic.nand.go` and `logic.duplicate.go`; the demo links its YAML and uses that example's registry. Core tests use private `_test.go` fixtures.
+
+Graph transition timeout uses a nonnegative Go duration string or infinite; omission/0s means infinite. Canonical JSON finite durations are integer nanoseconds and zero is omitted. Canonical YAML exports finite timeouts, but rejects local port remappings it cannot retain. Conflicting declarations must agree on effective timeout, including the default.
+
+Scenario clock type is real (default) or manual, with nonnegative finite start offset from Unix epoch. Manual-only steps contain one finite nonnegative advance_clock or expect. Step states empty/present check actual marking; other values are typed token expectations. A collection may supply a default clock. Existing top-level expect keeps value semantics. Runtime failure still fails a scenario; explicit expected-failure syntax remains future work. CLI validates only; RunScenario executes.
+
+Clock interface uses Now and NewTimer with stoppable timers; both clocks also expose After. Manual scenario work uses WaitClock/Settle and no sleeps. Test wall-time contexts are watchdogs only. Runtime contexts cancel on finalized expiry without pretending a manual clock is a wall-clock context deadline.
+
+GraphML: UTF-8 standard GraphML namespace, 8 MiB/file, 100000 elements, depth 128. DOCTYPE/directives/external entities, hyperedges and computational ports remain unsupported. Presentation/raw XML remains preserved separately. Actual yEd save/reopen is unverified.
+
+## Verification commands
 ```powershell
+$env:GOCACHE = Join-Path (Get-Location) '.cache/go-build'
+$env:GOMODCACHE = Join-Path (Get-Location) '.cache/go-mod'
 go test ./...
 go vet ./...
 go test -race ./...
 go run ./cmd/demo
-go run ./cmd/meshwork discover ./examples/distributed/primitives ./examples/distributed/composites
-go run ./cmd/meshwork link ./examples/distributed/primitives ./examples/distributed/composites
 go run ./cmd/meshwork validate ./examples/distributed/primitives ./examples/distributed/composites
+go run ./cmd/meshwork validate ./examples/timing
+go run ./cmd/meshwork diff ./linker/testdata/graphml/graph.nand.graphml ./linker/testdata/graphml/graph.nand.meshwork.yaml
+git diff --check
 ```
 
-The initial run succeeded with the default cache, but a subsequent command hit access denied under `C:\Users\nicks\AppData\Local\go-build`. Verification uses a workspace-local cache via `$env:GOCACHE = Join-Path (Get-Location) '.cache/go-build'`. This is an execution-environment setting, not a project dependency. `.cache/.gitignore` ignores generated cache contents. For ordinary use, a writable cache under `$env:TEMP` also works.
-
-The historical Go 1.22.3/toolchain-download warning is resolved. No Go language-version change was needed.
-
-Distributed-linker verification also sets `$env:GOMODCACHE = Join-Path (Get-Location) '.cache/go-mod'`. The sandbox initially denied network access for `go get`; an approved elevated download populated the workspace cache. All subsequent test/vet/race/demo/CLI commands ran with workspace-local caches. No compiler or Go directive changes were made. `docs/linker.md` specifies file schemas, repository configuration, identity rules, and execution limits.
-
-Prerequisite verification on 2026-10-28 used the same installed Go 1.27.3 and workspace-local caches. `go test ./...`, `go vet ./...`, `go test -race ./...`, the original OR demo, and distributed CLI validation passed. Validation now reports 42 places, 23 transitions, 17 scenarios after adding reusable NOT/MUX YAML fixtures. No dependencies, runtime versions, application code, or configuration changed in this verification task.
+Baseline full tests passed before changes. Full tests also pass after the new clock/scenario/supervision regressions; final validation is recorded in activeContext.md. Docs: README.md, docs/linker.md, docs/timing.md. Examples: existing distributed NAND/OR/MUX and new examples/timing timeout/infinite scenarios.

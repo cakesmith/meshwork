@@ -9,48 +9,37 @@ import (
 	"time"
 )
 
-// Graph is a layout-independent definition. References are metadata, not arcs.
+// Graph is the canonical, layout-independent Petri net, optionally still composed.
+// References are composition declarations, never computational arcs.
 type Graph struct {
-	Places     []Place
-	References []Reference
-}
-
-type Entity struct{ Inputs, Outputs []Place }
-type Architecture struct {
-	Entity         string
-	Implementation string
-	Graph          *Graph
-	Timeout        time.Duration
+	Stage       string `json:",omitempty"`
+	Places      []Place
+	Transitions []AtomicTransition
+	References  []Reference `json:",omitempty"`
 }
 type Reference struct {
-	Name         string
-	Architecture string
-	Bindings     map[string]string
+	Graph     string
+	Namespace string
+	Bindings  map[string]string
 }
-type Library struct {
-	Entities      map[string]Entity
-	Architectures map[string]Architecture
-}
+type Library struct{ Graphs map[string]Graph }
 type AtomicTransition struct {
 	Name                    string
 	Implementation          string
 	Inputs, Outputs         []string
 	InputPorts, OutputPorts []string
-	Timeout                 time.Duration
-	Sources                 []string
-	Architecture            string `json:",omitempty"`
-	Entity                  string `json:",omitempty"`
-}
-type ExecutableGraph struct {
-	Places      []Place
-	Transitions []AtomicTransition
+	Timeout                 time.Duration `json:",omitempty"`
+	Sources                 []string      `json:",omitempty"`
 }
 
-// Compose unifies declarations through the same resolver used for expansion.
+// ExecutableGraph retains the public name for flattened canonical graphs.
+type ExecutableGraph = Graph
+
 func (l Library) Compose(namespace string, graphs ...Graph) (ExecutableGraph, error) {
 	var joined Graph
 	for _, g := range graphs {
 		joined.Places = append(joined.Places, g.Places...)
+		joined.Transitions = append(joined.Transitions, g.Transitions...)
 		joined.References = append(joined.References, g.References...)
 	}
 	return l.Flatten(joined, namespace)
@@ -73,167 +62,245 @@ func Resolve(namespace, name string) (string, error) {
 	return name, nil
 }
 
-func ports(e Entity) ([]Place, error) {
-	all := append(append([]Place(nil), e.Inputs...), e.Outputs...)
-	seen := map[string]bool{}
-	if len(e.Inputs) == 0 || len(e.Outputs) == 0 {
-		return nil, fmt.Errorf("entity requires inputs and outputs")
+// Link resolves a graph's local identities and explicit reference bindings without
+// expanding its children. Instance namespaces are always explicit.
+func (l Library) Link(g Graph, namespace string) (Graph, error) {
+	if namespace != "/" && !validName(namespace) {
+		return Graph{}, fmt.Errorf("invalid namespace %q", namespace)
 	}
-	for _, p := range all {
-		if !validName("/"+p.Name) || strings.Contains(p.Name, "/") || p.Type == "" || seen[p.Name] {
-			return nil, fmt.Errorf("invalid or duplicate entity port %q", p.Name)
+	out := Graph{Stage: "linked"}
+	resolve := func(n string) (string, error) { return Resolve(namespace, n) }
+	for _, p := range g.Places {
+		n, err := resolve(p.Name)
+		if err != nil {
+			return Graph{}, err
 		}
-		seen[p.Name] = true
+		out.Places = append(out.Places, Place{n, p.Type})
 	}
-	return all, nil
+	for _, t := range g.Transitions {
+		var err error
+		t.Name, err = resolve(t.Name)
+		if err != nil {
+			return Graph{}, err
+		}
+		for direction, names := range [][]string{t.Inputs, t.Outputs} {
+			resolved := make([]string, len(names))
+			for i, n := range names {
+				resolved[i], err = resolve(n)
+				if err != nil {
+					return Graph{}, err
+				}
+			}
+			if direction == 0 {
+				t.Inputs = resolved
+			} else {
+				t.Outputs = resolved
+			}
+		}
+		out.Transitions = append(out.Transitions, t)
+	}
+	for _, ref := range g.References {
+		var err error
+		ref.Graph, err = resolve(ref.Graph)
+		if err != nil {
+			return Graph{}, err
+		}
+		if _, ok := l.Graphs[ref.Graph]; !ok {
+			return Graph{}, fmt.Errorf("unknown graph %q", ref.Graph)
+		}
+		if ref.Namespace == "" {
+			ref.Namespace = ref.Graph
+		} else if ref.Namespace != "/" {
+			ref.Namespace, err = resolve(ref.Namespace)
+			if err != nil {
+				return Graph{}, err
+			}
+		}
+		bindings := map[string]string{}
+		for k, v := range ref.Bindings {
+			key, err := Resolve(ref.Graph, k)
+			if err != nil {
+				return Graph{}, err
+			}
+			value, err := resolve(v)
+			if err != nil {
+				return Graph{}, err
+			}
+			if old, ok := bindings[key]; ok && old != value {
+				return Graph{}, fmt.Errorf("conflicting binding %s", key)
+			}
+			bindings[key] = value
+		}
+		ref.Bindings = bindings
+		out.References = append(out.References, ref)
+	}
+	return normalizeGraph(out, false)
 }
 
-// Flatten expands only finite, explicitly named references. Shared declarations
-// must agree; there is no architecture ownership rule that copies shared places.
+// Flatten expands finite graph references and merges compatible resolved objects.
 func (l Library) Flatten(g Graph, namespace string) (ExecutableGraph, error) {
+	stack := map[string]bool{}
+	var expand func(Graph, string) (Graph, error)
+	expand = func(g Graph, ns string) (Graph, error) {
+		linked, err := l.Link(g, ns)
+		if err != nil {
+			return Graph{}, err
+		}
+		out := Graph{Places: linked.Places, Transitions: linked.Transitions}
+		for _, ref := range linked.References {
+			if stack[ref.Graph] {
+				return Graph{}, fmt.Errorf("recursive graph reference %s", ref.Graph)
+			}
+			stack[ref.Graph] = true
+			child, err := expand(l.Graphs[ref.Graph], ref.Graph)
+			delete(stack, ref.Graph)
+			if err != nil {
+				return Graph{}, err
+			}
+			known := map[string]bool{}
+			for _, p := range child.Places {
+				known[p.Name] = true
+			}
+			for _, t := range child.Transitions {
+				known[t.Name] = true
+			}
+			for k := range ref.Bindings {
+				if !known[k] {
+					return Graph{}, fmt.Errorf("binding names unknown object %s", k)
+				}
+			}
+			remap := func(n string) string {
+				if v, ok := ref.Bindings[n]; ok {
+					return v
+				}
+				if strings.HasPrefix(n, strings.TrimSuffix(ref.Graph, "/")+"/") {
+					return strings.TrimSuffix(ref.Namespace, "/") + strings.TrimPrefix(n, strings.TrimSuffix(ref.Graph, "/"))
+				}
+				return n
+			}
+			for _, p := range child.Places {
+				p.Name = remap(p.Name)
+				out.Places = append(out.Places, p)
+			}
+			for _, t := range child.Transitions {
+				t.Name = remap(t.Name)
+				for i := range t.Inputs {
+					t.Inputs[i] = remap(t.Inputs[i])
+				}
+				for i := range t.Outputs {
+					t.Outputs[i] = remap(t.Outputs[i])
+				}
+				t.Sources = append(append([]string(nil), t.Sources...), ref.Graph+"@"+ref.Namespace)
+				out.Transitions = append(out.Transitions, t)
+			}
+		}
+		return out, nil
+	}
+	expanded, err := expand(g, namespace)
+	if err != nil {
+		return Graph{}, err
+	}
+	return normalizeGraph(expanded, true)
+}
+
+func sortedPorts(names, ports []string) ([]string, []string) {
+	order := make([]int, len(names))
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(i, j int) bool { return names[order[i]] < names[order[j]] })
+	nn, pp := make([]string, len(names)), make([]string, len(ports))
+	for i, j := range order {
+		nn[i] = names[j]
+		pp[i] = ports[j]
+	}
+	return nn, pp
+}
+
+func normalizeGraph(g Graph, requireEndpoints bool) (Graph, error) {
 	ps := map[string]Place{}
 	ts := map[string]AtomicTransition{}
-	stack := map[string]bool{}
-	addPlace := func(p Place) error {
+	transitionNames := map[string]bool{}
+	for _, t := range g.Transitions {
+		transitionNames[t.Name] = true
+	}
+	for _, p := range g.Places {
 		if !validName(p.Name) || p.Type == "" {
-			return fmt.Errorf("invalid place %+v", p)
-		}
-		if _, ok := ts[p.Name]; ok {
-			return fmt.Errorf("name used by transition: %s", p.Name)
+			return Graph{}, fmt.Errorf("invalid place %+v", p)
 		}
 		if old, ok := ps[p.Name]; ok && old.Type != p.Type {
-			return fmt.Errorf("incompatible place declarations: %s", p.Name)
+			return Graph{}, fmt.Errorf("incompatible place declarations: %s", p.Name)
 		}
 		ps[p.Name] = p
-		return nil
 	}
-	var expand func(Graph, string, map[string]string, string) error
-	expand = func(g Graph, ns string, bound map[string]string, source string) error {
-		declared := map[string]string{}
-		resolve := func(n string) (string, error) {
-			if v, ok := bound[n]; ok {
-				return v, nil
-			}
-			return Resolve(ns, n)
+	for _, t := range g.Transitions {
+		if !validName(t.Name) || t.Timeout < 0 {
+			return Graph{}, fmt.Errorf("invalid transition %s", t.Name)
 		}
-		for _, p := range g.Places {
-			n, err := resolve(p.Name)
-			if err != nil {
-				return err
-			}
-			if err := addPlace(Place{n, p.Type}); err != nil {
-				return err
-			}
-			declared[n] = p.Type
+		if _, ok := ps[t.Name]; ok {
+			return Graph{}, fmt.Errorf("name used by place: %s", t.Name)
 		}
-		for _, ref := range g.References {
-			name, err := Resolve(ns, ref.Name)
-			if err != nil {
-				return err
+		if !unique(t.Inputs) || !unique(t.Outputs) {
+			return Graph{}, fmt.Errorf("%s: duplicate arc; use explicit fan-out places", t.Name)
+		}
+		if len(t.Inputs) != len(t.InputPorts) || len(t.Outputs) != len(t.OutputPorts) || !unique(t.InputPorts) || !unique(t.OutputPorts) {
+			return Graph{}, fmt.Errorf("%s: invalid port mapping", t.Name)
+		}
+		for _, n := range append(append([]string(nil), t.Inputs...), t.Outputs...) {
+			if !validName(n) {
+				return Graph{}, fmt.Errorf("invalid arc endpoint %s", n)
 			}
-			a, ok := l.Architectures[ref.Architecture]
-			if !ok {
-				return fmt.Errorf("%s: unknown architecture %q", name, ref.Architecture)
+			if _, collision := transitionNames[n]; collision {
+				return Graph{}, fmt.Errorf("non-bipartite arc %s -> %s", n, t.Name)
 			}
-			e, ok := l.Entities[a.Entity]
-			if !ok {
-				return fmt.Errorf("%s: unknown entity %q", name, a.Entity)
+			if _, ok := ps[n]; !ok && requireEndpoints {
+				return Graph{}, fmt.Errorf("%s: unknown place %s", t.Name, n)
 			}
-			pp, err := ports(e)
-			if err != nil {
-				return fmt.Errorf("%s: %w", name, err)
+		}
+		t.Inputs, t.InputPorts = sortedPorts(t.Inputs, t.InputPorts)
+		t.Outputs, t.OutputPorts = sortedPorts(t.Outputs, t.OutputPorts)
+		sources := append([]string(nil), t.Sources...)
+		t.Sources = nil
+		if old, ok := ts[t.Name]; ok {
+			sources = append(sources, old.Sources...)
+			old.Sources = nil
+			if !reflect.DeepEqual(old, t) {
+				return Graph{}, fmt.Errorf("conflicting transition declarations: %s", t.Name)
 			}
-			if len(ref.Bindings) != len(pp) {
-				return fmt.Errorf("%s: expected exactly %d port bindings", name, len(pp))
+		}
+		sort.Strings(sources)
+		t.Sources = compact(sources)
+		ts[t.Name] = t
+	}
+	result := Graph{Stage: g.Stage}
+	refs := map[string]Reference{}
+	for _, ref := range g.References {
+		key := ref.Namespace + "\x00" + ref.Graph
+		if old, ok := refs[key]; ok {
+			if !reflect.DeepEqual(old.Bindings, ref.Bindings) {
+				return Graph{}, fmt.Errorf("conflicting graph binding for %s", ref.Namespace)
 			}
+		} else {
 			bindings := map[string]string{}
-			for _, p := range pp {
-				target, ok := ref.Bindings[p.Name]
-				if !ok {
-					return fmt.Errorf("%s: missing port %s", name, p.Name)
-				}
-				n, err := resolve(target)
-				if err != nil {
-					return err
-				}
-				if typ, ok := declared[n]; !ok || typ != p.Type {
-					return fmt.Errorf("%s: port %s requires declared %s place %s in the referring graph", name, p.Name, p.Type, n)
-				}
-				bindings[p.Name] = n
+			for k, v := range ref.Bindings {
+				bindings[k] = v
 			}
-			path := source + " -> " + ref.Architecture + "@" + name
-			if a.Timeout < 0 || (a.Graph == nil) == (a.Implementation == "") {
-				return fmt.Errorf("%s: architecture must have exactly one implementation", name)
-			}
-			if a.Graph != nil {
-				if a.Timeout != 0 {
-					return fmt.Errorf("%s: composite timeout cannot be lowered to atomic timeouts", name)
-				}
-				if stack[ref.Architecture] {
-					return fmt.Errorf("recursive architecture expansion: %s", path)
-				}
-				// Interface places must be declared explicitly in the implementation.
-				for _, p := range pp {
-					found := false
-					for _, q := range a.Graph.Places {
-						if q == p {
-							found = true
-						}
-					}
-					if !found {
-						return fmt.Errorf("%s: implementation lacks interface place %s", name, p.Name)
-					}
-				}
-				stack[ref.Architecture] = true
-				err := expand(*a.Graph, name, bindings, path)
-				delete(stack, ref.Architecture)
-				if err != nil {
-					return err
-				}
-				continue
-			}
-			t := AtomicTransition{Name: name, Implementation: a.Implementation, Timeout: a.Timeout}
-			for _, p := range e.Inputs {
-				t.Inputs = append(t.Inputs, bindings[p.Name])
-				t.InputPorts = append(t.InputPorts, p.Name)
-			}
-			for _, p := range e.Outputs {
-				t.Outputs = append(t.Outputs, bindings[p.Name])
-				t.OutputPorts = append(t.OutputPorts, p.Name)
-			}
-			if !unique(t.Inputs) || !unique(t.Outputs) {
-				return fmt.Errorf("%s: duplicate arc; use explicit fan-out places", name)
-			}
-			if _, ok := ps[name]; ok {
-				return fmt.Errorf("name used by place: %s", name)
-			}
-			if old, ok := ts[name]; ok {
-				sources := old.Sources
-				old.Sources = nil
-				if !reflect.DeepEqual(old, t) {
-					return fmt.Errorf("conflicting transition declarations: %s", name)
-				}
-				t.Sources = sources
-			}
-			t.Sources = append(t.Sources, path)
-			ts[name] = t
+			ref.Bindings = bindings
+			refs[key] = ref
 		}
-		return nil
 	}
-	if namespace != "/" && !validName(namespace) {
-		return ExecutableGraph{}, fmt.Errorf("invalid namespace %q", namespace)
+	keys := make([]string, 0, len(refs))
+	for key := range refs {
+		keys = append(keys, key)
 	}
-	// Predeclare every level before expanding references so declaration order is irrelevant.
-	if err := expand(g, namespace, nil, "root"); err != nil {
-		return ExecutableGraph{}, err
+	sort.Strings(keys)
+	for _, key := range keys {
+		result.References = append(result.References, refs[key])
 	}
-	result := ExecutableGraph{}
 	for _, p := range ps {
 		result.Places = append(result.Places, p)
 	}
 	for _, t := range ts {
-		sort.Strings(t.Sources)
-		t.Sources = compact(t.Sources)
 		result.Transitions = append(result.Transitions, t)
 	}
 	sort.Slice(result.Places, func(i, j int) bool { return result.Places[i].Name < result.Places[j].Name })
@@ -252,9 +319,15 @@ func compact(ss []string) []string {
 }
 
 // Instantiate validates a serialized executable graph before returning a runtime.
-// Implementations receive entity port names, independent of computational names.
-func (g ExecutableGraph) Instantiate(implementations map[string]Compute) (*Runtime, error) {
-	r := New()
+// Implementations receive local port names, independent of computational names.
+func (g Graph) Instantiate(implementations map[string]Compute) (*Runtime, error) {
+	return g.InstantiateWithClock(implementations, RealClock{})
+}
+func (g Graph) InstantiateWithClock(implementations map[string]Compute, clock Clock) (*Runtime, error) {
+	if len(g.References) != 0 {
+		return nil, fmt.Errorf("flatten graph references before instantiation")
+	}
+	r := NewWithClock(clock)
 	for _, p := range g.Places {
 		if err := r.AddPlace(p); err != nil {
 			return nil, err
@@ -264,9 +337,6 @@ func (g ExecutableGraph) Instantiate(implementations map[string]Compute) (*Runti
 		t := t
 		if t.Implementation == "" {
 			return nil, fmt.Errorf("%s: missing transition implementation", t.Name)
-		}
-		if t.Architecture != "" || t.Entity != "" {
-			return nil, fmt.Errorf("%s: unresolved architecture/entity reference", t.Name)
 		}
 		t.Inputs = append([]string(nil), t.Inputs...)
 		t.Outputs = append([]string(nil), t.Outputs...)

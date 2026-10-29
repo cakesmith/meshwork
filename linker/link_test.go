@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	distributed "example.com/meshwork-prototype/examples/distributed"
 	"example.com/meshwork-prototype/meshwork"
 )
 
@@ -45,7 +46,7 @@ func TestDistributedExamples(t *testing.T) {
 	if len(result.Scenarios) != 17 {
 		t.Fatalf("got %d scenarios", len(result.Scenarios))
 	}
-	_, impl := meshwork.LogicLibrary()
+	impl := distributed.Implementations()
 	before, _ := json.Marshal(result)
 	for _, s := range result.Scenarios {
 		if _, err := RunScenario(context.Background(), result.Definitions[s.Graph], s, impl); err != nil {
@@ -91,7 +92,7 @@ func TestCrossDirectoryOR(t *testing.T) {
 	if len(g.Places) != 9 || len(g.Transitions) != 5 {
 		t.Fatalf("unexpected cross-directory OR: %+v", g)
 	}
-	_, impl := meshwork.LogicLibrary()
+	impl := distributed.Implementations()
 	for _, a := range []bool{false, true} {
 		for _, b := range []bool{false, true} {
 			ta, _ := meshwork.NewToken("Bool", a)
@@ -184,7 +185,7 @@ func TestMergeBindingsAndImplementationOrigin(t *testing.T) {
 	if len(r.Graph.Places) != 3 || len(r.Graph.Transitions) != 1 || len(r.Graph.Transitions[0].Inputs) != 2 {
 		t.Fatalf("merge failed: %+v", r.Graph)
 	}
-	want := filepath.ToSlash(filepath.Join(root, "b", "Nand.kt")) + "#compute"
+	want := "./Nand.kt#compute"
 	if r.Graph.Transitions[0].Implementation != want {
 		t.Fatalf("got %q want %q", r.Graph.Transitions[0].Implementation, want)
 	}
@@ -299,7 +300,7 @@ func TestScenarioFailuresAndIsolation(t *testing.T) {
 	}
 	s := r.Scenarios[0]
 	g := r.Definitions[s.Graph]
-	_, impl := meshwork.LogicLibrary()
+	impl := distributed.Implementations()
 	if _, err := RunScenario(context.Background(), g, s, nil); err == nil {
 		t.Fatal("accepted missing implementation")
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	distributed "example.com/meshwork-prototype/examples/distributed"
 	"example.com/meshwork-prototype/meshwork"
 )
 
@@ -88,7 +89,7 @@ func TestReusableMUXTruthTable(t *testing.T) {
 	if len(g.Places) != 23 || len(g.Transitions) != 14 {
 		t.Fatalf("unexpected MUX expansion: %+v", g)
 	}
-	_, impl := meshwork.LogicLibrary()
+	impl := distributed.Implementations()
 	for _, tr := range g.Transitions {
 		if tr.Implementation != "logic.nand.go" && tr.Implementation != "logic.duplicate.go" {
 			t.Fatalf("MUX introduced a special implementation: %+v", tr)

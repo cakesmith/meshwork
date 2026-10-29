@@ -57,7 +57,7 @@ arcs:
 
 These files jointly define three places, one transition, and three arcs. Places, transitions, and arcs may each be supplied independently; executable validation happens after merging. There is no required graph ID. Matching resolved names merge, independent of the source's repository. Identical place types and transition implementations merge; arcs form a deduplicated union. Conflicting types, implementations, node kinds, or port mappings fail. Both endpoints must exist and have opposite node kinds. Conflicts include resolved names, conflicting values, and source filenames/lines; independent merge conflicts are reported together.
 
-`./Nand.kt#compute` or `../Nand.kt#compute` resolves to an absolute, slash-separated source path plus symbol relative to the *declaring file*. Other implementation strings are opaque registry keys. Linking never opens implementation source, checks source existence, compiles it, or runs it. The caller must register a `meshwork.Compute` under the resolved implementation string before instantiation.
+The consuming project owns the adjacent `logic.nand.go` source file and binds it explicitly in its application registry. `implementation` is that registry's stable key, conventionally the neighboring filename; it is not a path Meshwork opens or a package Meshwork imports. The distributed example keeps [the graph](../examples/distributed/primitives/implementation/graph.nand.meshwork.yaml), [implementation](../examples/distributed/primitives/implementation/logic.nand.go), and [consumer registry](../examples/distributed/implementations.go) separate from the Meshwork runtime.
 
 Names can be local (`A`), relative (`../shared/A`), or absolute (`/shared/A`). Relative dot segments are normalized and cannot escape the computational root. Empty segments, trailing separators, whitespace, and backslashes are rejected. File-level bindings are explicit, simultaneous aliases; they do not chain:
 
@@ -88,7 +88,7 @@ The `namespace` on each reference is an explicit relocation of names under the t
 
 References and bindings are metadata, never arcs. The canonical workspace graph contains discovered definitions and their explicitly expanded occurrences. `Result.Definitions` exposes each selected region, including referenced definitions and the places required by selected transitions. It performs no reachability-based subgraph extraction. The [OR fixture](../examples/distributed/composites/logic/graph.or.meshwork.yaml) reuses NAND and explicit duplication with the same mechanism across repositories.
 
-Runtime port names are the basenames of resolved arc place endpoints **before reference relocation/bindings**; file aliases are already resolved. Ports within each input/output direction must be unique. They remain attached to their endpoints when names are rebound, so a NAND function continues receiving `A`, `B`, and producing `Q` even when those endpoints resolve to other names. Arbitrary file-level entity interfaces/port renaming are deferred; the existing Go entity/architecture API is unchanged.
+Runtime port names are the basenames of resolved arc place endpoints **before reference relocation/bindings**; file aliases are already resolved. Ports within each input/output direction must be unique. They remain attached to their endpoints when names are rebound, so a NAND function continues receiving `A`, `B`, and producing `Q` even when those endpoints resolve to other names. Transition implementations use local port names; graphs are the only reusable definitions in both YAML and Go.
 
 ## Scenarios
 
@@ -111,7 +111,7 @@ linked, err := linker.Link([]linker.Repository{
     {Name: "composites", Root: "examples/distributed/composites"},
 })
 if err != nil { return err }
-_, implementations := meshwork.LogicLibrary()
+implementations := distributed.Implementations()
 for _, scenario := range linked.Scenarios {
     _, err := linker.RunScenario(ctx, linked.Definitions[scenario.Graph], scenario, implementations)
     if err != nil { return err }
@@ -120,7 +120,7 @@ for _, scenario := range linked.Scenarios {
 
 `RunScenario` instantiates a fresh runtime each time and fires each transition once, retrying disabled transitions after progress. Stalls, implementation errors, cancellation, and failed expectations return errors. This bounded helper supports these finite examples; it does not define general cyclic, reactive, concurrent, or lifecycle scheduling. Kernel atomicity and token validation remain unchanged.
 
-Canonical output sorts objects, arcs/ports, and provenance. Shuffling discovery order produces identical output. Provenance and implementation source paths are absolute, so moving the checkout can change serialized paths while computational identities stay unchanged. File syntax for entity contracts/architecture alternatives and place-based subgraph traversal remain open; neither blocks this milestone.
+Canonical output sorts objects, arcs/ports, and provenance. Shuffling discovery order produces identical output. Scenarios cannot substitute implementations or rewrite composition. Place-based subgraph traversal remains open.
 
 ## GraphML and yEd
 
@@ -144,9 +144,8 @@ In yEd's Custom Properties dialog create string properties on nodes:
 | `meshwork.name` | Computational name, independent of XML ID/visible label |
 | `meshwork.namespace` | Optional node namespace override |
 | `meshwork.type` | Nominal place token type, e.g. `Bool` |
-| `meshwork.implementation` | Transition implementation registry key or relative source path |
-| `meshwork.architecture` | Transition architecture reference, retained as unresolved metadata |
-| `meshwork.entity` | Transition entity reference, retained as unresolved metadata |
+| `meshwork.implementation` | Transition implementation registry key |
+| `meshwork.timeout` | Nonnegative transition duration such as `30s`; omitted or `infinite` means no deadline |
 
 The GraphML `<key>` must declare `attr.name` and `attr.type="string"`, with `for="node"` (or `all`). A graph-level `meshwork.namespace` key uses `for="graph"`. Standard key defaults are supported. For example:
 
@@ -166,15 +165,13 @@ Nodes without a kind remain noncomputational. With `--yed` (or `conventions=true
 
 Ordinary directed edges between computational nodes become arcs; edges between decorative nodes stay decorative. An edge touching just one computational endpoint is rejected unless explicitly marked `meshwork.kind=annotation` using an edge-scoped property. Missing node references always fail, including decorative edges. Unknown Meshwork properties fail rather than silently losing intended semantics. Graph properties support namespace only; edge properties support kind only. Places cannot carry transition properties and transitions cannot carry place types.
 
-Empty place types, missing implementation keys and absent transition inputs/outputs produce sorted `Result.Diagnostics`. Compatible known declarations can complete missing fields across files; two different nonempty types, implementations, architecture/entity references, or node kinds halt linking with an empty Result. Structural errors (including same-kind arcs and conflicting ports) always fail. Import permits inspection of incomplete diagrams; CLI `validate` reports them and exits unsuccessfully, while CLI `link` emits no executable graph for incomplete inputs. `Instantiate` rejects empty implementations, missing types/topology and unresolved contract references. Existing nominal types have no type/schema registry; nonempty type names are not checked against an external vocabulary. Registry availability is checked at instantiation, not import.
+Empty place types, missing implementation keys and absent transition inputs/outputs produce sorted `Result.Diagnostics`. Compatible known declarations can complete missing fields across files; two different nonempty types, implementations, timeouts, or node kinds halt linking with an empty Result. Structural errors (including same-kind arcs and conflicting ports) always fail. Import permits inspection of incomplete diagrams; CLI `validate` reports them and exits unsuccessfully, while CLI `link` emits no executable graph for incomplete inputs. `Instantiate` rejects empty implementations, missing types/topology. Existing nominal types have no type/schema registry; nonempty type names are not checked against an external vocabulary. Registry availability is checked at instantiation, not import.
 
-The file linker has no entity/architecture contract resolver yet. Those references are retained on `AtomicTransition`, included in semantic comparisons/conflict checks and diagnosed as unresolved; even a supplied implementation cannot bypass an unresolved contract. Existing Go `Library` entity/architecture composition remains available. YAML-only linking retains its existing completeness requirements; a mixed GraphML/YAML link can complete partial contributions before execution checks.
-
-`Result.Imports` preserves original XML, filename, node/edge properties, XML-ID-to-identity mapping, inference convention, labels, shapes, geometry and group flags. Routing, colors, fonts and other extensions remain accessible in the original XML. Presentation and provenance do not affect token hashes or semantic equality. Use `CanonicalJSON(result.Graph)` for source-independent comparison and `CanonicalYAML` for deterministic resolved YAML. Both expect linked canonical input; JSON removes transition source paths. YAML export refuses timeouts or remapped ports it cannot preserve. Incomplete YAML exports remain incomplete and cannot pass standalone strict YAML linking.
+`Result.Imports` preserves original XML, filename, node/edge properties, XML-ID-to-identity mapping, inference convention, labels, shapes, geometry and group flags. Routing, colors, fonts and other extensions remain accessible in the original XML. Presentation and provenance do not affect token hashes or semantic equality. Use `CanonicalJSON(result.Graph)` for source-independent comparison and `CanonicalYAML` for deterministic resolved YAML. Both expect linked canonical input. YAML export preserves transition timeouts and omits infinite defaults. It still refuses remapped ports it cannot preserve. Incomplete YAML exports remain incomplete and cannot pass standalone strict YAML linking.
 
 The parser requires standard GraphML namespaces and UTF-8 XML (with optional BOM), rejects DOCTYPE/directives and unknown entities, and never resolves external resources. Limits: 8 MiB per file, 100,000 XML elements, depth 128. Hyperedges and computational GraphML ports are unsupported. ShapeNode/GroupNode/ProxyAutoBoundsNode visual content is recognized; other yEd graphics remain preserved in raw XML, with no promise of inference support. This is not full GraphML schema validation or bidirectional synchronization.
 
-The paired fixtures in `linker/testdata/graphml/` use hand-authored yEd-compatible structures, including nested groups, geometry, colors, edge routing and a legend. They were not saved by an actual yEd installation. Tests compare NAND with YAML, execute its truth table through the existing kernel, vary presentation/IDs/XML order, merge complementary/mixed sources, verify diagnostics/provenance and reject invalid/untrusted inputs. Next smallest synchronization milestone: compare a changed source's ID/provenance mapping against a stored import and report semantic edits, without rewriting XML.
+The paired fixtures in `linker/testdata/graphml/` use hand-authored yEd-compatible structures, including nested groups, geometry, colors, edge routing and a legend. They were not saved by an actual yEd installation. Tests compare NAND with YAML, execute its truth table through the existing kernel, vary presentation/IDs/XML order, merge complementary/mixed sources, verify diagnostics/provenance and reject invalid/untrusted inputs. Semantic change reporting is implemented below; XML rewriting remains out of scope.
 
 ## Semantic comparison
 
@@ -191,11 +188,11 @@ report, err := linker.DiffResults(before, after)
 // Handle err; json.Marshal(report) or report.WriteText(writer, beforePath, afterPath).
 ```
 
-`Diff(beforeGraph, afterGraph)` accepts canonical `meshwork.ExecutableGraph` values directly. It validates absolute unique computational names, declared place endpoints, port alignment/uniqueness and nonnegative timeouts without instantiating transitions. Missing types, implementation keys, input/output topology and unresolved architecture/entity contracts remain comparable. Types are nominal strings; no external type registry or schema validation exists. Duplicate canonical identities are rejected; compatible source declarations must first be unified by the linker. Comparison loading permits incomplete YAML without relaxing normal YAML-only `LinkFiles` validation.
+`Diff(beforeGraph, afterGraph)` accepts canonical `meshwork.ExecutableGraph` values directly. It validates absolute unique computational names, declared place endpoints, port alignment/uniqueness and nonnegative timeouts without instantiating transitions. Missing types, implementation keys and input/output topology remain comparable. Types are nominal strings; no external type registry or schema validation exists. Duplicate canonical identities are rejected; compatible source declarations must first be unified by the linker. Comparison loading permits incomplete YAML without relaxing normal YAML-only `LinkFiles` validation.
 
 `DiffResults` additionally consumes `Result.Sources`, a sidecar mapping resolved node names and directed `from -> to` arc identities to sorted unique source-location strings. YAML locations retain file/line and GraphML locations retain file/node or edge ID, including declarations remapped by references and multiple declarations of one identity. Existing transition `Sources` provide a fallback for graphs created outside the linker. Hand-built graphs without provenance compare normally but cannot report absent source information.
 
-Semantic matching uses resolved computational names. Places compare nominal types; transitions compare implementation, architecture, entity and timeout. Directed arcs compare endpoints and local transition port names. A changed local port yields arc removal/addition; deleting a vertex also reports each removed arc. Architecture changes use `architecture_binding_changed`; other transition contract changes use `transition_definition_changed`. Typed before/after snapshots retain all current computational attributes. Arrays are sorted deterministically by computational identity; removals precede additions for a replaced identity or arc. Empty report categories serialize as `[]`.
+Semantic matching uses resolved computational names. Places compare nominal types; transitions compare implementation and timeout. Directed arcs compare endpoints and local transition port names. A changed local port yields arc removal/addition; deleting a vertex also reports each removed arc. Transition changes use `transition_definition_changed`. At the linked stage, graph references compare their resolved target, explicit namespace and bindings; binding edits use `reference_binding_changed`, while target/namespace edits remove/add references. `Library.Link` produces this stage without flattening; `Library.Flatten` expands it. Comparing linked and flattened graphs fails explicitly. CLI comparison continues using flattened graphs. Typed before/after snapshots retain all current computational attributes. Arrays are sorted deterministically by computational identity; removals precede additions for a replaced identity or arc. Empty report categories serialize as `[]`.
 
 Provenance changes are independent of semantic changes and include both before/after source sets. File moves, source format changes, line changes and regenerated GraphML IDs may change provenance alone. Presentation, raw XML, annotations, groups, geometry, color and document traversal order are excluded from computation. Reordering YAML can still change line provenance. Reports do not include scenarios, definition selectors or runtime markings.
 
@@ -233,4 +230,13 @@ Equivalent JSON:
 
 Changed elements include `kind`, `element`, `identity`, typed `before`/`after` values and `beforeSources`/`afterSources`. A type edit retains, for example, `before: {"type":"Bool"}` and `after: {"type":"Bit"}`. Successful diffs return zero even when changes exist; invalid inputs produce no partial report.
 
-Remaining boundaries: actual yEd save/reopen remains unverified, architecture/entity contracts remain metadata, relative implementation file references remain resolved absolute paths (moving implementation files can therefore be semantic), and no GraphML rewriting occurs. The next milestone is a non-destructive GraphML patch planner that reports proposed edits without writing XML.
+Remaining boundaries: actual yEd save/reopen remains unverified and no GraphML rewriting occurs. The next smallest useful milestone is explicit expected-failure assertions in scenarios. XML patch planning and synchronization are separate work.
+
+
+## Timed execution
+
+Transition definitions accept `timeout: 30s`; omitted, `0s` or `infinite` means no deadline. Negative, malformed and non-string timeout values fail parsing. Compatible contributions must agree on the effective timeout. GraphML uses the equivalent string `meshwork.timeout` property. Canonical JSON stores finite durations as integer nanoseconds; YAML exports finite Go duration strings and omits infinity.
+
+Scenarios retain their existing singular/plural file schemas and marking/expectations. They add `clock: {type: manual, start: 0s}` and ordered `steps`, each containing one `advance_clock` or `expect`. A collection may supply a default clock. Step expectations accept typed values or the place states `empty`/`present`. Clocks and steps cannot add transitions/arcs, change types, replace implementation keys or substitute subgraphs. Scenario bindings only resolve marking/expectation names against the already-composed graph.
+
+See [timing details and runnable Go API](timing.md). The standard CLI validates these declarations; the Go scenario runner executes them. A manual scenario's last step is its stopping condition, so pending timed attempts are canceled and their reservations released on return. Failures remain errors; there is no implicit retry policy or expected-failure syntax yet.

@@ -5,11 +5,15 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"example.com/meshwork-prototype/meshwork"
 )
 
-type declaration struct{ Name, Kind, Type, Implementation, Architecture, Entity, Source string }
+type declaration struct {
+	Name, Kind, Type, Implementation, Source string
+	Timeout                                  time.Duration
+}
 type arc struct{ From, To, Port, Source string }
 type region struct {
 	Sources []*source
@@ -138,12 +142,12 @@ func linkFiles(files []File, allowIncomplete bool) (Result, error) {
 				if err != nil {
 					return c, fmt.Errorf("%s: %w", s.loc("transitions", name), err)
 				}
-				impl, err := implementation(s.File.Path, s.Doc.Transitions[name].Implementation)
+				impl, err := implementation(s.Doc.Transitions[name].Implementation)
 				if err != nil && !(allowIncomplete && s.Doc.Transitions[name].Implementation == "") {
 					return c, fmt.Errorf("%s: %s: %w", s.loc("transitions", name), n, err)
 				}
 				t := s.Doc.Transitions[name]
-				addNode(declaration{Name: n, Kind: "transition", Implementation: impl, Architecture: t.Architecture, Entity: t.Entity, Source: s.loc("transitions", name)}, name)
+				addNode(declaration{Name: n, Kind: "transition", Implementation: impl, Timeout: time.Duration(t.Timeout), Source: s.loc("transitions", name)}, name)
 			}
 			for index, a := range s.Doc.Arcs {
 				if len(a) != 2 {
@@ -354,20 +358,14 @@ func canonical(c contribution, allowIncomplete bool) (meshwork.ExecutableGraph, 
 			continue
 		}
 		if old, ok := nodes[n.Name]; ok {
-			if old.Kind != n.Kind || (old.Type != "" && n.Type != "" && old.Type != n.Type) || (old.Implementation != "" && n.Implementation != "" && old.Implementation != n.Implementation) || (old.Architecture != "" && n.Architecture != "" && old.Architecture != n.Architecture) || (old.Entity != "" && n.Entity != "" && old.Entity != n.Entity) {
-				problems = append(problems, fmt.Errorf("%s and %s: conflicting identity %s: {kind:%q type:%q implementation:%q architecture:%q entity:%q} versus {kind:%q type:%q implementation:%q architecture:%q entity:%q}", old.Source, n.Source, n.Name, old.Kind, old.Type, old.Implementation, old.Architecture, old.Entity, n.Kind, n.Type, n.Implementation, n.Architecture, n.Entity))
+			if old.Kind != n.Kind || (old.Type != "" && n.Type != "" && old.Type != n.Type) || (old.Implementation != "" && n.Implementation != "" && old.Implementation != n.Implementation) || old.Timeout != n.Timeout {
+				problems = append(problems, fmt.Errorf("%s and %s: conflicting identity %s: {kind:%q type:%q implementation:%q timeout:%s} versus {kind:%q type:%q implementation:%q timeout:%s}", old.Source, n.Source, n.Name, old.Kind, old.Type, old.Implementation, old.Timeout, n.Kind, n.Type, n.Implementation, n.Timeout))
 			}
 			if old.Type == "" {
 				old.Type = n.Type
 			}
 			if old.Implementation == "" {
 				old.Implementation = n.Implementation
-			}
-			if old.Architecture == "" {
-				old.Architecture = n.Architecture
-			}
-			if old.Entity == "" {
-				old.Entity = n.Entity
 			}
 			nodes[n.Name] = old
 		} else {
@@ -383,7 +381,7 @@ func canonical(c contribution, allowIncomplete bool) (meshwork.ExecutableGraph, 
 			g.Places = append(g.Places, meshwork.Place{Name: name, Type: n.Type})
 		} else {
 			sort.Strings(sources[name])
-			ts[name] = &meshwork.AtomicTransition{Name: name, Implementation: n.Implementation, Architecture: n.Architecture, Entity: n.Entity, Sources: dedup(sources[name])}
+			ts[name] = &meshwork.AtomicTransition{Name: name, Implementation: n.Implementation, Timeout: n.Timeout, Sources: dedup(sources[name])}
 		}
 	}
 	sort.Slice(c.Arcs, func(i, j int) bool {

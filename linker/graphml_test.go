@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	distributed "example.com/meshwork-prototype/examples/distributed"
 	"example.com/meshwork-prototype/meshwork"
 )
 
@@ -107,7 +108,7 @@ func TestGraphMLNANDEquivalence(t *testing.T) {
 		t.Fatal("YAML round trip changed semantics")
 	}
 	// Execute through the existing registry/kernel, without an importer execution path.
-	_, registry := meshwork.LogicLibrary()
+	registry := distributed.Implementations()
 	registry["builtin.nand"] = registry["logic.nand.go"]
 	for _, a := range []bool{false, true} {
 		for _, b := range []bool{false, true} {
@@ -186,7 +187,7 @@ func TestGraphMLIncompleteAndConventions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, registry := meshwork.LogicLibrary()
+	registry := distributed.Implementations()
 	registry[""] = registry["logic.nand.go"]
 	if _, err := r.Graph.Instantiate(registry); err == nil {
 		t.Fatal("invented missing implementation")
@@ -214,16 +215,11 @@ func TestGraphMLIncompleteAndConventions(t *testing.T) {
 		t.Fatalf("guessed computational node: %+v %v", r, err)
 	}
 	architecture := strings.Replace(text, `<key id="impl" for="node" attr.name="meshwork.implementation" attr.type="string"/>`, `<key id="impl" for="node" attr.name="meshwork.architecture" attr.type="string"/>`, 1)
-	r, err = importText(t, architecture, false)
-	if err != nil {
-		t.Fatal(err)
+	_, err = importText(t, architecture, false)
+	if err == nil || !strings.Contains(err.Error(), "unknown semantic property") {
+		t.Fatalf("obsolete architecture accepted: %v", err)
 	}
-	if r.Graph.Transitions[0].Architecture != "builtin.nand" || len(r.Diagnostics) != 2 {
-		t.Fatal(r.Diagnostics)
-	}
-	if _, err := r.Graph.Instantiate(nil); err == nil {
-		t.Fatal("unresolved architecture executed")
-	}
+
 }
 func TestGraphMLDiscoveryAndMerging(t *testing.T) {
 	root := t.TempDir()
@@ -358,7 +354,7 @@ func TestGraphMLIsolatedNodesAndMetadataConflicts(t *testing.T) {
 	if _, err := r.Graph.Instantiate(nil); err == nil {
 		t.Fatal("isolated transition executed")
 	}
-	for _, property := range []string{"meshwork.implementation", "meshwork.architecture", "meshwork.entity"} {
+	for _, property := range []string{"meshwork.implementation"} {
 		t.Run(property, func(t *testing.T) {
 			root := t.TempDir()
 			a := strings.Replace(text, "meshwork.implementation", property, 1)
@@ -396,7 +392,7 @@ func TestGraphMLUsesExistingComposition(t *testing.T) {
 	if len(g.Places) != 3 || len(g.Transitions) != 1 || g.Transitions[0].Name != "/use/first/nand" || !reflect.DeepEqual(g.Transitions[0].Inputs, []string{"/inputs/A", "/inputs/B"}) || !reflect.DeepEqual(g.Transitions[0].InputPorts, []string{"A", "B"}) {
 		t.Fatalf("GraphML bypassed composition: %+v", g)
 	}
-	_, registry := meshwork.LogicLibrary()
+	registry := distributed.Implementations()
 	registry["builtin.nand"] = registry["logic.nand.go"]
 	rt, err := g.Instantiate(registry)
 	if err != nil {

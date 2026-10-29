@@ -45,19 +45,19 @@ func runGraph(t *testing.T, g ExecutableGraph, impl map[string]Compute, values m
 }
 
 func TestLogicTruthTables(t *testing.T) {
-	l, impl := LogicLibrary()
-	for _, arch := range []string{"logic.nand:go", "logic.not:nand", "logic.or:nand"} {
+	l, impl := testLogicLibrary()
+	for _, arch := range []string{"/logic/nand", "/logic/not", "/logic/or"} {
 		for _, a := range []bool{false, true} {
 			for _, b := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%t/%t", arch, a, b), func(t *testing.T) {
-					g := ORGraph()
-					g.References[0].Architecture = arch
+					g := testORGraph()
+					g.References[0].Graph = arch
 					values := map[string]bool{"/test/A": a, "/test/B": b}
 					want := a || b
-					if arch == "logic.nand:go" {
+					if arch == "/logic/nand" {
 						want = !(a && b)
 					}
-					if arch == "logic.not:nand" {
+					if arch == "/logic/not" {
 						delete(g.References[0].Bindings, "B")
 						g.Places = []Place{{"A", "Bool"}, {"Q", "Bool"}}
 						delete(values, "/test/B")
@@ -67,7 +67,7 @@ func TestLogicTruthTables(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if arch == "logic.or:nand" && (len(flat.Transitions) != 5 || len(flat.Places) != 9) {
+					if arch == "/logic/or" && (len(flat.Transitions) != 5 || len(flat.Places) != 9) {
 						t.Fatalf("unexpected OR graph: %+v", flat)
 					}
 					data, err := json.Marshal(flat)
@@ -102,8 +102,8 @@ func TestLogicTruthTables(t *testing.T) {
 }
 
 func TestResolutionAndComposition(t *testing.T) {
-	l, _ := LogicLibrary()
-	g := ORGraph()
+	l, _ := testLogicLibrary()
+	g := testORGraph()
 	one, err := l.Compose("/test", g, g)
 	if err != nil {
 		t.Fatal(err)
@@ -115,8 +115,8 @@ func TestResolutionAndComposition(t *testing.T) {
 	if !reflect.DeepEqual(one, single) {
 		t.Fatal("identical names must share objects")
 	}
-	g2 := ORGraph()
-	g2.References[0].Name = "another"
+	g2 := testORGraph()
+	g2.References[0].Namespace = "another"
 	two, err := l.Compose("/test", g, g2)
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestResolutionAndComposition(t *testing.T) {
 	if len(two.Transitions) != 10 || len(two.Places) != 15 {
 		t.Fatalf("distinct names must keep internal objects independent: %+v", two)
 	}
-	g = ORGraph()
+	g = testORGraph()
 	g.References = append(g.References, g2.References...)
 	fwd, err := l.Flatten(g, "/test")
 	if err != nil {
@@ -158,40 +158,25 @@ func TestInvalidGraphs(t *testing.T) {
 		change         func(*Graph, *Library)
 	}{
 		{"type conflict", "incompatible place", func(g *Graph, l *Library) { g.Places = append(g.Places, Place{"A", "Image"}) }},
-		{"place transition collision", "name used", func(g *Graph, l *Library) { g.Places = append(g.Places, Place{"or/nand", "Bool"}) }},
-		{"missing place", "requires declared", func(g *Graph, l *Library) { g.Places = g.Places[1:] }},
-		{"wrong interface type", "requires declared", func(g *Graph, l *Library) { g.Places[0].Type = "Image" }},
-		{"missing binding", "bindings", func(g *Graph, l *Library) { delete(g.References[0].Bindings, "A") }},
-		{"unknown architecture", "unknown architecture", func(g *Graph, l *Library) { g.References[0].Architecture = "unknown" }},
-		{"unknown entity", "unknown entity", func(g *Graph, l *Library) {
-			a := l.Architectures["logic.or:nand"]
-			a.Entity = "missing"
-			l.Architectures["logic.or:nand"] = a
-		}},
+		{"place transition collision", "name used", func(g *Graph, l *Library) { g.Places = append(g.Places, Place{"or/nand/nand", "Bool"}) }},
+		{"unknown graph", "unknown graph", func(g *Graph, l *Library) { g.References[0].Graph = "/unknown" }},
+		{"unknown binding", "unknown object", func(g *Graph, l *Library) { g.References[0].Bindings["missing"] = "A" }},
 		{"duplicate input arc", "duplicate arc", func(g *Graph, l *Library) {
-			g.References[0].Architecture = "logic.nand:go"
+			g.References[0].Graph = "/logic/nand"
 			g.References[0].Bindings["B"] = "A"
 		}},
-		{"conflicting transition", "conflicting transition", func(g *Graph, l *Library) {
-			g.References[0].Architecture = "logic.nand:go"
-			g.References = append(g.References, Reference{Name: "or", Architecture: "logic.nand:go", Bindings: map[string]string{"A": "B", "B": "A", "Q": "Q"}})
+		{"conflicting transition", "conflicting graph binding", func(g *Graph, l *Library) {
+			g.References[0].Graph = "/logic/nand"
+			g.References = append(g.References, Reference{Namespace: "or", Graph: "/logic/nand", Bindings: map[string]string{"A": "B", "B": "A", "Q": "Q"}})
 		}},
 		{"recursive expansion", "recursive", func(g *Graph, l *Library) {
-			a := l.Architectures["logic.or:nand"]
-			a.Graph = &Graph{Places: g.Places, References: []Reference{{Name: "again", Architecture: "logic.or:nand", Bindings: map[string]string{"A": "A", "B": "B", "Q": "Q"}}}}
-			l.Architectures["logic.or:nand"] = a
+			l.Graphs["/logic/or"] = Graph{References: []Reference{{Graph: "/logic/or"}}}
 		}},
-		{"incomplete implementation interface", "interface place", func(g *Graph, l *Library) {
-			a := l.Architectures["logic.or:nand"]
-			copyGraph := *a.Graph
-			copyGraph.Places = copyGraph.Places[1:]
-			a.Graph = &copyGraph
-			l.Architectures["logic.or:nand"] = a
-		}},
+		{"wrong bound type", "incompatible place", func(g *Graph, l *Library) { g.Places[0].Type = "Image" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			g := ORGraph()
-			l, _ := LogicLibrary()
+			g := testORGraph()
+			l, _ := testLogicLibrary()
 			tc.change(&g, &l)
 			_, err := l.Flatten(g, "/test")
 			if err == nil || !strings.Contains(err.Error(), tc.contains) {
@@ -216,8 +201,8 @@ func TestInvalidGraphs(t *testing.T) {
 }
 
 func TestInstantiateValidationAndIsolation(t *testing.T) {
-	l, impl := LogicLibrary()
-	flat, err := l.Flatten(ORGraph(), "/test")
+	l, impl := testLogicLibrary()
+	flat, err := l.Flatten(testORGraph(), "/test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,5 +229,62 @@ func TestInstantiateValidationAndIsolation(t *testing.T) {
 	}
 	if err := r.Fire(context.Background(), first); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGraphInstancesHaveOnlyExplicitNamespaces(t *testing.T) {
+	l, _ := testLogicLibrary()
+	g := Graph{References: []Reference{{Graph: "/logic/nand"}, {Graph: "/logic/nand"}}}
+	one, err := l.Flatten(g, "/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(one.Places) != 3 || len(one.Transitions) != 1 || one.Places[0].Name != "/logic/nand/A" {
+		t.Fatal("implicit occurrence namespace", one)
+	}
+	g.References[0].Namespace = "first"
+	g.References[1].Namespace = "second"
+	two, err := l.Flatten(g, "/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(two.Places) != 6 || len(two.Transitions) != 2 {
+		t.Fatal("explicit namespaces did not separate instances", two)
+	}
+	for _, tr := range two.Transitions {
+		for _, endpoint := range append(append([]string(nil), tr.Inputs...), tr.Outputs...) {
+			found := false
+			for _, p := range two.Places {
+				if p.Name == endpoint {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("non-bipartite flattened endpoint", endpoint)
+			}
+		}
+	}
+	before, _ := json.Marshal(l)
+	g.References[1].Bindings = map[string]string{"A": "/shared"}
+	linked, err := l.Link(g, "/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversed := Graph{References: []Reference{g.References[1], g.References[0]}}
+	linked2, err := l.Link(reversed, "/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := json.Marshal(linked)
+	b, _ := json.Marshal(linked2)
+	if string(a) != string(b) {
+		t.Fatal("nondeterministic linked graph")
+	}
+	if _, err := l.Flatten(linked, "/test"); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := json.Marshal(l)
+	if string(before) != string(after) {
+		t.Fatal("linking mutated graph library")
 	}
 }

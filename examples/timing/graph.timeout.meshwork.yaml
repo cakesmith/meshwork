@@ -1,0 +1,12 @@
+namespace: /timing/timeout
+places:
+  duration: Duration
+  clock: Clock
+  timeout_event: TimeoutEvent
+transitions:
+  timeout:
+    implementation: meshwork.timeout
+arcs:
+  - [duration, timeout]
+  - [clock, timeout]
+  - [timeout, timeout_event]

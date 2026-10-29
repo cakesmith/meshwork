@@ -70,8 +70,6 @@ func TestDiffSemanticChanges(t *testing.T) {
 		{"transition removed", func(r *Result) { r.Graph.Transitions = nil }, []string{"arc_removed", "arc_removed", "transition_removed", "arc_removed"}},
 		{"implementation", func(r *Result) { r.Graph.Transitions[0].Implementation = "other" }, []string{"transition_definition_changed"}},
 		{"timeout", func(r *Result) { r.Graph.Transitions[0].Timeout = 1 }, []string{"transition_definition_changed"}},
-		{"entity", func(r *Result) { r.Graph.Transitions[0].Entity = "contract" }, []string{"transition_definition_changed"}},
-		{"architecture", func(r *Result) { r.Graph.Transitions[0].Architecture = "alternative" }, []string{"architecture_binding_changed"}},
 		{"arc added", func(r *Result) {
 			r.Graph.Transitions[0].Inputs = append(r.Graph.Transitions[0].Inputs, "/logic/nand/Q")
 			r.Graph.Transitions[0].InputPorts = append(r.Graph.Transitions[0].InputPorts, "Q")
@@ -277,7 +275,6 @@ func TestDiffValidation(t *testing.T) {
 	incomplete := cloneResult(t, base)
 	incomplete.Graph.Places[0].Type = ""
 	incomplete.Graph.Transitions[0].Implementation = ""
-	incomplete.Graph.Transitions[0].Architecture = "unresolved"
 	if _, e := Diff(base.Graph, incomplete.Graph); e != nil {
 		t.Fatal(e)
 	}

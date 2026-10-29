@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"errors"
-	"example.com/meshwork-prototype/meshwork"
 	"fmt"
 	"log"
+
+	distributed "example.com/meshwork-prototype/examples/distributed"
+	"example.com/meshwork-prototype/linker"
+	"example.com/meshwork-prototype/meshwork"
 )
 
 func main() {
@@ -14,18 +17,22 @@ func main() {
 	}
 }
 func demo() error {
-	library, impl := meshwork.LogicLibrary()
-	graph, err := library.Flatten(meshwork.ORGraph(), "/logic")
+	linked, err := linker.Link([]linker.Repository{
+		{Name: "primitives", Root: "examples/distributed/primitives", Namespace: "/projects/logic"},
+		{Name: "composites", Root: "examples/distributed/composites", Namespace: "/projects/logic"},
+	})
 	if err != nil {
 		return err
 	}
+	graph := linked.Definitions["composites:or"]
+	impl := distributed.Implementations()
 	for _, a := range []bool{false, true} {
 		for _, b := range []bool{false, true} {
 			r, err := graph.Instantiate(impl)
 			if err != nil {
 				return err
 			}
-			for name, value := range map[string]bool{"/logic/A": a, "/logic/B": b} {
+			for name, value := range map[string]bool{"/logic/or/A": a, "/logic/or/B": b} {
 				tok, err := meshwork.NewToken("Bool", value)
 				if err != nil {
 					return err
@@ -51,7 +58,7 @@ func demo() error {
 				}
 				pending = next
 			}
-			q, ok := r.Token("/logic/Q")
+			q, ok := r.Token("/logic/or/Q")
 			if !ok {
 				return fmt.Errorf("missing OR result")
 			}

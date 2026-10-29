@@ -150,11 +150,11 @@ type graphMLKey struct {
 	Name, Scope, Type, Default string
 	HasDefault                 bool
 }
-type semanticProperties struct{ Kind, Name, Namespace, Type, Architecture, Implementation, Entity string }
+type semanticProperties struct{ Kind, Name, Namespace, Type, Implementation, Timeout string }
 
 func semantics(p map[string]string) (semanticProperties, error) {
 	var s semanticProperties
-	fields := map[string]*string{"meshwork.kind": &s.Kind, "meshwork.name": &s.Name, "meshwork.namespace": &s.Namespace, "meshwork.type": &s.Type, "meshwork.architecture": &s.Architecture, "meshwork.implementation": &s.Implementation, "meshwork.entity": &s.Entity}
+	fields := map[string]*string{"meshwork.kind": &s.Kind, "meshwork.name": &s.Name, "meshwork.namespace": &s.Namespace, "meshwork.type": &s.Type, "meshwork.implementation": &s.Implementation, "meshwork.timeout": &s.Timeout}
 	for _, k := range sortedKeys(p) {
 		v := p[k]
 		if !strings.HasPrefix(k, "meshwork.") {
@@ -340,7 +340,7 @@ func parseGraphML(f File) (_ *source, err error) {
 		if err != nil {
 			return err
 		}
-		if sp.Kind != "" || sp.Name != "" || sp.Type != "" || sp.Architecture != "" || sp.Implementation != "" || sp.Entity != "" {
+		if sp.Kind != "" || sp.Name != "" || sp.Type != "" || sp.Timeout != "" || sp.Implementation != "" {
 			return fmt.Errorf("graph %s: only meshwork.namespace is supported on graphs", g.attr("id"))
 		}
 		if sp.Namespace != "" {
@@ -417,7 +417,7 @@ func parseGraphML(f File) (_ *source, err error) {
 					}
 					kinds[name] = sp.Kind
 					if sp.Kind == "place" {
-						if sp.Architecture != "" || sp.Entity != "" || sp.Implementation != "" {
+						if sp.Timeout != "" || sp.Implementation != "" {
 							return fmt.Errorf("node %s: place cannot declare transition properties", id)
 						}
 						old := s.Doc.Places[name]
@@ -431,7 +431,11 @@ func parseGraphML(f File) (_ *source, err error) {
 						if sp.Type != "" {
 							return fmt.Errorf("node %s: transition cannot declare place type", id)
 						}
-						t := transition{Implementation: sp.Implementation, Architecture: sp.Architecture, Entity: sp.Entity}
+						timeout, err := parseDuration(sp.Timeout)
+						if err != nil {
+							return fmt.Errorf("%s: %w", id, err)
+						}
+						t := transition{Implementation: sp.Implementation, Timeout: duration(timeout)}
 						old, ok := s.Doc.Transitions[name]
 						if ok {
 							merge := func(a *string, b string) bool {
@@ -443,7 +447,7 @@ func parseGraphML(f File) (_ *source, err error) {
 								}
 								return true
 							}
-							if !merge(&t.Implementation, old.Implementation) || !merge(&t.Architecture, old.Architecture) || !merge(&t.Entity, old.Entity) {
+							if !merge(&t.Implementation, old.Implementation) || t.Timeout != old.Timeout {
 								return fmt.Errorf("node %s: conflicting transition %s", id, name)
 							}
 						}
@@ -511,7 +515,7 @@ func parseGraphML(f File) (_ *source, err error) {
 		if err != nil {
 			return nil, err
 		}
-		if sp.Name != "" || sp.Namespace != "" || sp.Type != "" || sp.Architecture != "" || sp.Implementation != "" || sp.Entity != "" {
+		if sp.Name != "" || sp.Namespace != "" || sp.Type != "" || sp.Timeout != "" || sp.Implementation != "" {
 			return nil, fmt.Errorf("edge %s: only meshwork.kind is supported on edges", id)
 		}
 		from, to := identities[a], identities[b]
@@ -557,12 +561,6 @@ func incomplete(g meshwork.ExecutableGraph, declarations []declaration) []string
 		if t.Implementation == "" {
 			add(t.Name, "missing transition implementation")
 		}
-		if t.Architecture != "" {
-			add(t.Name, "unresolved architecture "+t.Architecture)
-		}
-		if t.Entity != "" {
-			add(t.Name, "unresolved entity "+t.Entity)
-		}
 		if len(t.Inputs) == 0 || len(t.Outputs) == 0 {
 			add(t.Name, "missing transition inputs/outputs")
 		}
@@ -587,14 +585,12 @@ func CanonicalYAML(g meshwork.ExecutableGraph) ([]byte, error) {
 		Places      map[string]string     `yaml:"places"`
 		Transitions map[string]transition `yaml:"transitions"`
 		Arcs        [][]string            `yaml:"arcs"`
+		References  []reference           `yaml:"references,omitempty"`
 	}{Namespace: "/", Places: map[string]string{}, Transitions: map[string]transition{}}
 	for _, p := range g.Places {
 		d.Places[p.Name] = p.Type
 	}
 	for _, t := range g.Transitions {
-		if t.Timeout != 0 {
-			return nil, fmt.Errorf("YAML does not support transition timeouts")
-		}
 		for _, direction := range []struct{ Places, Ports []string }{{t.Inputs, t.InputPorts}, {t.Outputs, t.OutputPorts}} {
 			if len(direction.Places) != len(direction.Ports) {
 				return nil, fmt.Errorf("%s: invalid port mapping", t.Name)
@@ -605,7 +601,7 @@ func CanonicalYAML(g meshwork.ExecutableGraph) ([]byte, error) {
 				}
 			}
 		}
-		d.Transitions[t.Name] = transition{Implementation: t.Implementation, Architecture: t.Architecture, Entity: t.Entity}
+		d.Transitions[t.Name] = transition{Implementation: t.Implementation, Timeout: duration(t.Timeout)}
 		for _, p := range t.Inputs {
 			d.Arcs = append(d.Arcs, []string{p, t.Name})
 		}
@@ -614,5 +610,8 @@ func CanonicalYAML(g meshwork.ExecutableGraph) ([]byte, error) {
 		}
 	}
 	sort.Slice(d.Arcs, func(i, j int) bool { return strings.Join(d.Arcs[i], "\x00") < strings.Join(d.Arcs[j], "\x00") })
+	for _, ref := range g.References {
+		d.References = append(d.References, reference{Graph: ref.Graph, Namespace: ref.Namespace, Bindings: ref.Bindings})
+	}
 	return yaml.Marshal(d)
 }

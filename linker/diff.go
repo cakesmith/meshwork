@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -14,14 +15,15 @@ import (
 
 // Value contains only canonical computational attributes. Arcs carry local port names.
 type Value struct {
-	Type           string        `json:"type,omitempty"`
-	Implementation string        `json:"implementation,omitempty"`
-	Architecture   string        `json:"architecture,omitempty"`
-	Entity         string        `json:"entity,omitempty"`
-	Timeout        time.Duration `json:"timeout,omitempty"`
-	From           string        `json:"from,omitempty"`
-	To             string        `json:"to,omitempty"`
-	Port           string        `json:"port,omitempty"`
+	Type           string            `json:"type,omitempty"`
+	Implementation string            `json:"implementation,omitempty"`
+	Graph          string            `json:"graph,omitempty"`
+	Namespace      string            `json:"namespace,omitempty"`
+	Bindings       map[string]string `json:"bindings,omitempty"`
+	Timeout        time.Duration     `json:"timeout,omitempty"`
+	From           string            `json:"from,omitempty"`
+	To             string            `json:"to,omitempty"`
+	Port           string            `json:"port,omitempty"`
 }
 type Change struct {
 	Kind          string   `json:"kind"`
@@ -56,6 +58,12 @@ func Diff(before, after meshwork.ExecutableGraph) (Report, error) {
 }
 
 func diffIndex(r Result) (map[string]diffElement, error) {
+	if r.Graph.Stage != "" && r.Graph.Stage != "linked" && r.Graph.Stage != "flattened" {
+		return nil, fmt.Errorf("unknown graph resolution stage %q", r.Graph.Stage)
+	}
+	if len(r.Graph.References) > 0 && r.Graph.Stage != "linked" {
+		return nil, fmt.Errorf("graph references require linked resolution stage")
+	}
 	index := map[string]diffElement{}
 	valid := func(n string) bool {
 		resolved, err := meshwork.Resolve("/", n)
@@ -85,7 +93,7 @@ func diffIndex(r Result) (map[string]diffElement, error) {
 		if !valid(t.Name) || t.Timeout < 0 {
 			return nil, fmt.Errorf("invalid transition %q or timeout", t.Name)
 		}
-		if err := add(t.Name, "transition", Value{Implementation: t.Implementation, Architecture: t.Architecture, Entity: t.Entity, Timeout: t.Timeout}, t.Sources); err != nil {
+		if err := add(t.Name, "transition", Value{Implementation: t.Implementation, Timeout: t.Timeout}, t.Sources); err != nil {
 			return nil, err
 		}
 	}
@@ -122,12 +130,36 @@ func diffIndex(r Result) (map[string]diffElement, error) {
 			}
 		}
 	}
+	for _, ref := range r.Graph.References {
+		if !valid(ref.Graph) || (ref.Namespace != "/" && !valid(ref.Namespace)) {
+			return nil, fmt.Errorf("unresolved graph reference")
+		}
+		bindings := map[string]string{}
+		for k, v := range ref.Bindings {
+			if !valid(k) || !valid(v) {
+				return nil, fmt.Errorf("unresolved reference binding")
+			}
+			bindings[k] = v
+		}
+		if err := add(ref.Namespace+" uses "+ref.Graph, "reference", Value{Graph: ref.Graph, Namespace: ref.Namespace, Bindings: bindings}, nil); err != nil {
+			return nil, err
+		}
+	}
 	return index, nil
 }
 
 // DiffResults compares only Graph semantics; Sources is independent provenance.
 // Imports, definitions, diagnostics, scenarios and presentation are not computation.
 func DiffResults(before, after Result) (Report, error) {
+	stage := func(g meshwork.Graph) string {
+		if g.Stage == "" {
+			return "flattened"
+		}
+		return g.Stage
+	}
+	if stage(before.Graph) != stage(after.Graph) {
+		return Report{}, fmt.Errorf("compare graphs at the same resolution stage (linked or flattened)")
+	}
 	report := Report{SemanticChanges: []Change{}, ProvenanceChanges: []Change{}, PossibleRenames: []PossibleRename{}}
 	a, err := diffIndex(before)
 	if err != nil {
@@ -178,15 +210,14 @@ func DiffResults(before, after Result) (Report, error) {
 			c.Kind = next.kind + "_added"
 			c.Before = nil
 			c.BeforeSources = []string{}
-		case old.value != next.value:
+		case !reflect.DeepEqual(old.value, next.value):
 			switch old.kind {
 			case "place":
 				c.Kind = "place_type_changed"
 			case "transition":
 				c.Kind = "transition_definition_changed"
-				if old.value.Architecture != next.value.Architecture {
-					c.Kind = "architecture_binding_changed"
-				}
+			case "reference":
+				c.Kind = "reference_binding_changed"
 			case "arc":
 				removed := c
 				removed.Kind = "arc_removed"

@@ -1,0 +1,19 @@
+graph: /timing/timeout
+scenarios:
+  - name: expires_at_30_seconds
+    clock: {type: manual, start: 0s}
+    marking: {duration: 30s, clock: execution}
+    steps:
+      - advance_clock: 29s
+      - expect: {timeout_event: empty}
+      - advance_clock: 1s
+      - expect: {timeout_event: present}
+      - advance_clock: 1s
+      - expect: {timeout_event: true}
+    expect: {timeout_event: true}
+  - name: infinite
+    clock: {type: manual, start: 0s}
+    marking: {duration: infinite, clock: execution}
+    steps:
+      - advance_clock: 100000h
+      - expect: {timeout_event: empty}

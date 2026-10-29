@@ -69,11 +69,21 @@ type Runtime struct {
 	places      map[string]*placeState
 	transitions map[string]Transition
 	attempt     uint64
+	clock       Clock
+	clocks      map[string]Clock
+	active      map[uint64]*Attempt
+	changed     chan struct{}
 	OnError     func(transition string, err error) // called after reservations release
 }
 
 func New() *Runtime {
-	return &Runtime{places: map[string]*placeState{}, transitions: map[string]Transition{}}
+	return NewWithClock(RealClock{})
+}
+func NewWithClock(clock Clock) *Runtime {
+	if clock == nil {
+		clock = RealClock{}
+	}
+	return &Runtime{places: map[string]*placeState{}, transitions: map[string]Transition{}, clock: clock, clocks: map[string]Clock{"execution": clock}, active: map[uint64]*Attempt{}, changed: make(chan struct{})}
 }
 func validName(n string) bool {
 	if !strings.HasPrefix(n, "/") {
@@ -204,27 +214,38 @@ func (r *Runtime) Snapshot() []Snapshot {
 
 var ErrNotEnabled = errors.New("transition not enabled")
 
-// Fire reserves all inputs and outputs together, computes outside the lock, then
-// atomically commits consumption and production. On error, marking is unchanged.
+// Fire starts one attempt and waits for its atomic commit or finalized failure.
 func (r *Runtime) Fire(parent context.Context, name string) error {
+	a, err := r.Start(parent, name)
+	if err != nil {
+		return err
+	}
+	return a.Wait(parent)
+}
+
+// Start reserves all inputs/outputs before returning a unique execution attempt.
+func (r *Runtime) Start(parent context.Context, name string) (*Attempt, error) {
+	if err := parent.Err(); err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	t, ok := r.transitions[name]
 	if !ok {
 		r.mu.Unlock()
-		return fmt.Errorf("unknown transition %s", name)
+		return nil, fmt.Errorf("unknown transition %s", name)
 	}
 	for _, n := range t.Inputs {
 		p := r.places[n]
 		if p.token == nil || p.inputOwner != 0 {
 			r.mu.Unlock()
-			return fmt.Errorf("%w: input %s", ErrNotEnabled, n)
+			return nil, fmt.Errorf("%w: input %s", ErrNotEnabled, n)
 		}
 	}
 	for _, n := range t.Outputs {
 		p := r.places[n]
 		if p.outputOwner != 0 {
 			r.mu.Unlock()
-			return fmt.Errorf("%w: output locked %s", ErrNotEnabled, n)
+			return nil, fmt.Errorf("%w: output locked %s", ErrNotEnabled, n)
 		}
 		// An input/output self-loop consumes and replaces its own token.
 		isInput := false
@@ -236,7 +257,7 @@ func (r *Runtime) Fire(parent context.Context, name string) error {
 		}
 		if p.token != nil && !isInput {
 			r.mu.Unlock()
-			return fmt.Errorf("%w: output full %s", ErrNotEnabled, n)
+			return nil, fmt.Errorf("%w: output full %s", ErrNotEnabled, n)
 		}
 	}
 	r.attempt++
@@ -250,91 +271,32 @@ func (r *Runtime) Fire(parent context.Context, name string) error {
 	for _, n := range t.Outputs {
 		r.places[n].outputOwner = id
 	}
-	r.mu.Unlock()
-	ctx := parent
-	cancel := func() {}
+
+	ctx, cancel := context.WithCancel(parent)
+	a := &Attempt{id: id, runtime: r, transition: t, ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	a.ctx = context.WithValue(ctx, attemptKey{}, a)
 	if t.Timeout > 0 {
-		ctx, cancel = context.WithTimeout(parent, t.Timeout)
+		a.deadline = r.clock.Now().Add(t.Timeout)
+		a.timer = r.clock.NewTimer(t.Timeout)
 	}
-	defer cancel()
-	type completion struct {
-		result map[string]Token
-		err    error
-	}
-	finished := make(chan completion, 1)
-	go func() {
-		c := completion{}
-		defer func() {
-			if p := recover(); p != nil {
-				c.err = fmt.Errorf("transition %s panicked: %v", name, p)
-			}
-			finished <- c
-		}()
-		c.result, c.err = t.Run(ctx, inputs)
-	}()
-	var result map[string]Token
-	var err error
-	select {
-	case c := <-finished:
-		result, err = c.result, c.err
-	case <-ctx.Done():
-		err = ctx.Err()
-	}
-	ctxErr := ctx.Err()
-	if ctxErr != nil {
-		err = ctxErr
-	}
-	if err == nil {
-		if len(result) != len(t.Outputs) {
-			err = fmt.Errorf("transition %s returned %d outputs, expected %d", name, len(result), len(t.Outputs))
-		} else {
-			for _, n := range t.Outputs {
-				tok, exists := result[n]
-				if !exists {
-					err = fmt.Errorf("missing output %s", n)
-					break
-				}
-				if tok.Type != r.placeType(n) {
-					err = fmt.Errorf("wrong output type for %s", n)
-					break
-				}
-				if e := validateToken(tok); e != nil {
-					err = fmt.Errorf("output %s: %w", n, e)
-					break
-				}
-			}
-		}
-	}
-	r.mu.Lock()
-	if ctx.Err() != nil {
-		err = ctx.Err()
-	}
-	if err == nil {
-		for _, n := range t.Inputs {
-			r.places[n].token = nil
-		}
-		for _, n := range t.Outputs {
-			cp := result[n].Clone()
-			r.places[n].token = &cp
-		}
-	}
-	for _, n := range t.Inputs {
-		r.places[n].inputOwner = 0
-	}
-	for _, n := range t.Outputs {
-		r.places[n].outputOwner = 0
-	}
-	handler := r.OnError
+	r.active[id] = a
+	r.notifyLocked()
 	r.mu.Unlock()
-	if err != nil && handler != nil {
-		handler(name, err)
-	}
-	return err
-}
-func (r *Runtime) placeType(name string) string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.places[name].definition.Type
+	go a.execute(inputs)
+	go func() {
+		var deadline <-chan time.Time
+		if a.timer != nil {
+			deadline = a.timer.C()
+		}
+		select {
+		case <-deadline:
+			r.finish(a, nil, context.DeadlineExceeded)
+		case <-parent.Done():
+			r.finish(a, nil, parent.Err())
+		case <-a.done:
+		}
+	}()
+	return a, nil
 }
 
 func validateToken(t Token) error {
