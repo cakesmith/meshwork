@@ -57,3 +57,12 @@ Before each new request, read this file and relevant code/technical context. Upd
 - `cmd/demo` now links the distributed YAML consumer and executes it with `examples/distributed/implementations.go`. The demo still reports all four OR truth-table results with five transitions each.
 - GraphML/import tests now obtain their NAND function from the distributed consumer registry. Core composition tests use private `meshwork/graph_fixture_test.go` fixtures only; those fixtures are not part of the built Meshwork package.
 - Updated README.md plus systemPatterns.md and techContext.md before removal. Validation passed: `go test ./... -count=1`, `go vet ./...`, `go test -race ./...`, `go run ./cmd/demo`, and `git diff --check`.
+
+## CLI/linker boundary review (2026-10-29)
+- Confirmed the executable boundary: `cmd/meshwork` is a thin human-facing adapter; `linker` is the reusable file-format/discovery/link/diagnostic API consumed by the CLI, demo, tests, and prospective consumers. They must remain separate packages, but their user-facing verbs can shrink.
+- Current CLI exposes internal pipeline stages as `discover`, `link`, `validate`, and `import`, plus the distinct `diff`. `link` and `validate` both discover and link; `import` is a GraphML-specific presentation of the same linker result; `discover` is a debugging/API concern. A future simplification should retain an inspection/check command, an explicit export command if canonical serialization is required, and `diff`; make GraphML an automatically recognized input instead of a separate mode. Preserve the Go linker API and explicit multi-repository configuration for advanced composition.
+- No application code, command behavior, or tests changed during this review. Next step is a product decision on whether canonical export needs a CLI command; only then change the command surface and its tests/docs.
+
+## Demo relocation (2026-10-29)
+- Moved the consumer-owned OR truth-table executable from `cmd/demo/main.go` to `examples/distributed/demo/main.go`. `cmd/` now contains only the Meshwork CLI entry point; the demonstration stays with the consumer graph and implementation registry it exercises.
+- Updated README.md, systemPatterns.md, and techContext.md to use `go run ./examples/distributed/demo`. Verified with workspace-local Go caches: `go test ./... -count=1`, `go run ./examples/distributed/demo`, and `git diff --check`.

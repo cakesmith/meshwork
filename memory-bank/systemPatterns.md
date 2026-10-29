@@ -34,4 +34,4 @@ Linker compatibility is implementation detail, not user-facing format guidance: 
 - meshwork/graph.go: canonical graph composition; tests provide private graph fixtures only.
 - linker/files.go, link.go, graphml.go: discovery, strict parsing, resolution, merge, canonicalization and source sidecars.
 - linker/scenario.go and diff.go: isolated finite execution/manual steps and semantic comparison.
-- cmd/meshwork: discover/link/validate/import/diff; cmd/demo: consumer-owned distributed OR truth table.
+- cmd/meshwork: discover/link/validate/import/diff; examples/distributed/demo: consumer-owned distributed OR truth table.
