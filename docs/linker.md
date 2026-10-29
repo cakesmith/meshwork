@@ -144,7 +144,7 @@ In yEd's Custom Properties dialog create string properties on nodes:
 | `meshwork.name` | Computational name, independent of XML ID/visible label |
 | `meshwork.namespace` | Optional node namespace override |
 | `meshwork.type` | Nominal place token type, e.g. `Bool` |
-| `meshwork.implementation` | Transition implementation registry key |
+| `meshwork.implementation` | Transition implementation |
 | `meshwork.timeout` | Nonnegative transition duration such as `30s`; omitted or `infinite` means no deadline |
 
 The GraphML `<key>` must declare `attr.name` and `attr.type="string"`, with `for="node"` (or `all`). A graph-level `meshwork.namespace` key uses `for="graph"`. Standard key defaults are supported. For example:

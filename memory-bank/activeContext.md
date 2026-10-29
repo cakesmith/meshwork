@@ -34,9 +34,13 @@ No Go/dependency changes, staging or commits. All 26 requested invariant/behavio
 Before each new request, read this file and relevant code/technical context. Update systemPatterns.md or techContext.md before architectural edits. Record discrepancies immediately and update this state at milestones/closure; provide the human a memory-update checklist.
 
 ## Latest inspection (2026-10-29)
-- Moved linker compatibility details (obsolete entity/architecture rejection, mixed-source completion and effective-timeout conflicts) from docs/linker.md into the memory bank. The public GraphML key table now calls `meshwork.implementation` only a transition implementation registry key.
+- Moved linker compatibility details (obsolete entity/architecture rejection, mixed-source completion and effective-timeout conflicts) from docs/linker.md into the memory bank. The public GraphML key table now labels `meshwork.implementation` only as the transition implementation; registry/path mechanics remain internal context.
 - Removed relative implementation-source normalization. `implementation`/`meshwork.implementation` is now opaque end to end: `./Nand.kt#compute` remains that literal key and is resolved only from the caller's `map[string]Compute` at instantiation. No linker reads, validates or derives a source path.
 - Validation after this edit: `go test ./linker ./meshwork -count=1` and `git diff --check` passed using workspace-local Go caches.
+
+## Documentation boundary adjustment (2026-10-29)
+- Removed "registry key" implementation mechanics from the public GraphML property table. `meshwork.implementation` remains required runtime identity, not a relative source path: `Instantiate` uses it to choose the consumer-supplied `map[string]Compute` function. Its opaque-key rule and source-file convention remain in system/technical memory context only.
+- No parser, schema, graph, or runtime behavior changed. Next work must not remove the property without first selecting a replacement executable binding contract.
 
 ## Pending architecture decision (2026-10-29)
 - User clarified that a transition's Go implementation must live beside its graph YAML. Current implementation identifiers are intentionally opaque keys resolved only by the caller's `map[string]Compute`; Go cannot dynamically compile or load an adjacent source file. Choose the intended binding mechanism before code changes, then update systemPatterns.md and techContext.md.
