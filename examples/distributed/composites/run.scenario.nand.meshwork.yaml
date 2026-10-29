@@ -1,0 +1,4 @@
+graph: logic.nand
+name: example
+marking: {A: true, B: true}
+expect: {Q: false}

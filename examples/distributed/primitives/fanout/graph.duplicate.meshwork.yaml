@@ -1,0 +1,9 @@
+namespace: /logic/duplicate
+places: {A: Bool, L: Bool, R: Bool}
+transitions:
+  duplicate:
+    implementation: logic.duplicate.go
+arcs:
+  - [A, duplicate]
+  - [duplicate, L]
+  - [duplicate, R]

@@ -1,0 +1,8 @@
+namespace: /logic/nand
+transitions:
+  nand:
+    implementation: logic.nand.go
+arcs:
+  - [A, nand]
+  - [B, nand]
+  - [nand, Q]

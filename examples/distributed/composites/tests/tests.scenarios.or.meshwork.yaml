@@ -1,0 +1,14 @@
+graph: composites:or
+scenarios:
+  - name: false_false
+    marking: {A: false, B: false}
+    expect: {Q: false}
+  - name: false_true
+    marking: {A: false, B: true}
+    expect: {Q: true}
+  - name: true_false
+    marking: {A: true, B: false}
+    expect: {Q: true}
+  - name: true_true
+    marking: {A: true, B: true}
+    expect: {Q: true}

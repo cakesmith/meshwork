@@ -1,0 +1,27 @@
+namespace: /logic/or
+places:
+  A: Bool
+  B: Bool
+  Q: Bool
+  aL: Bool
+  aR: Bool
+  bL: Bool
+  bR: Bool
+  notA: Bool
+  notB: Bool
+references:
+  - graph: primitives:duplicate
+    namespace: /logic/or/dupA
+    bindings: {A: A, L: aL, R: aR}
+  - graph: primitives:duplicate
+    namespace: /logic/or/dupB
+    bindings: {A: B, L: bL, R: bR}
+  - graph: primitives:nand
+    namespace: /logic/or/invertA
+    bindings: {A: aL, B: aR, Q: notA}
+  - graph: primitives:nand
+    namespace: /logic/or/invertB
+    bindings: {A: bL, B: bR, Q: notB}
+  - graph: primitives:nand
+    namespace: /logic/or/final
+    bindings: {A: notA, B: notB, Q: Q}

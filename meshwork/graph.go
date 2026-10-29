@@ -38,6 +38,8 @@ type AtomicTransition struct {
 	InputPorts, OutputPorts []string
 	Timeout                 time.Duration
 	Sources                 []string
+	Architecture            string `json:",omitempty"`
+	Entity                  string `json:",omitempty"`
 }
 type ExecutableGraph struct {
 	Places      []Place
@@ -260,6 +262,12 @@ func (g ExecutableGraph) Instantiate(implementations map[string]Compute) (*Runti
 	}
 	for _, t := range g.Transitions {
 		t := t
+		if t.Implementation == "" {
+			return nil, fmt.Errorf("%s: missing transition implementation", t.Name)
+		}
+		if t.Architecture != "" || t.Entity != "" {
+			return nil, fmt.Errorf("%s: unresolved architecture/entity reference", t.Name)
+		}
 		t.Inputs = append([]string(nil), t.Inputs...)
 		t.Outputs = append([]string(nil), t.Outputs...)
 		t.InputPorts = append([]string(nil), t.InputPorts...)

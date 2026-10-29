@@ -1,0 +1,26 @@
+graph: composites:mux
+scenarios:
+  - name: false_false_false
+    marking: {A: false, B: false, S: false}
+    expect: {Q: false}
+  - name: false_false_true
+    marking: {A: false, B: false, S: true}
+    expect: {Q: false}
+  - name: false_true_false
+    marking: {A: false, B: true, S: false}
+    expect: {Q: false}
+  - name: false_true_true
+    marking: {A: false, B: true, S: true}
+    expect: {Q: true}
+  - name: true_false_false
+    marking: {A: true, B: false, S: false}
+    expect: {Q: true}
+  - name: true_false_true
+    marking: {A: true, B: false, S: true}
+    expect: {Q: false}
+  - name: true_true_false
+    marking: {A: true, B: true, S: false}
+    expect: {Q: true}
+  - name: true_true_true
+    marking: {A: true, B: true, S: true}
+    expect: {Q: true}

@@ -1,0 +1,35 @@
+namespace: /logic/mux
+places:
+  A: Bool
+  B: Bool
+  S: Bool
+  Q: Bool
+  sA: Bool
+  sB: Bool
+  notS: Bool
+  negA: Bool
+  negB: Bool
+  andA: Bool
+  andB: Bool
+references:
+  - graph: primitives:duplicate
+    namespace: selector
+    bindings: {A: S, L: sA, R: sB}
+  - graph: composites:not
+    namespace: invertSelector
+    bindings: {A: sA, Q: notS}
+  - graph: primitives:nand
+    namespace: gateA
+    bindings: {A: A, B: notS, Q: negA}
+  - graph: composites:not
+    namespace: invertA
+    bindings: {A: negA, Q: andA}
+  - graph: primitives:nand
+    namespace: gateB
+    bindings: {A: B, B: sB, Q: negB}
+  - graph: composites:not
+    namespace: invertB
+    bindings: {A: negB, Q: andB}
+  - graph: composites:or
+    namespace: combine
+    bindings: {A: andA, B: andB, Q: Q}

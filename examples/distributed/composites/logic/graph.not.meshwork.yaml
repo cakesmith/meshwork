@@ -1,0 +1,9 @@
+namespace: /logic/not
+places: {A: Bool, Q: Bool, left: Bool, right: Bool}
+references:
+  - graph: primitives:duplicate
+    namespace: dup
+    bindings: {A: A, L: left, R: right}
+  - graph: primitives:nand
+    namespace: nand
+    bindings: {A: left, B: right, Q: Q}

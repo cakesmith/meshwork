@@ -1,0 +1,5 @@
+namespace: /logic/nand
+places:
+  A: Bool
+  B: Bool
+  Q: Bool

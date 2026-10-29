@@ -1,6 +1,8 @@
 # Meshwork
 
-A standard-library Go prototype for strictly 1-safe, typed Petri nets. The current milestone composes OR from reusable NAND architectures through explicit token fan-out. Meshwork remains independent of Collator.
+A Go prototype for strictly 1-safe, typed Petri nets. It composes OR from reusable NAND architectures and links graph contributions discovered across repositories. The kernel uses the standard library; YAML authoring uses `gopkg.in/yaml.v3`. Meshwork remains independent of Collator.
+
+The distributed examples also compose MUX from reusable OR, NOT, NAND and explicit duplication graphs. Tests verify independent repository discovery/unification, conflicts halting linking without partial output, and all NAND/OR/MUX truth tables. See [linker verification and examples](docs/linker.md).
 
 ## Run
 
@@ -27,6 +29,8 @@ $env:GOCACHE = Join-Path $env:TEMP 'meshwork-go-build'
 - `meshwork/graph.go`: graph definitions, entities, architecture references, deterministic name resolution, composition, and flattening.
 - `meshwork/logic.go`: NAND and duplication primitives; NOT and OR composed as ordinary graphs.
 - `cmd/demo`: executes the flattened OR graph for all four input combinations.
+- `linker`: recursive YAML discovery, repository-aware resolution, strict merging, and isolated scenarios.
+- `cmd/meshwork`: `discover`, `link`, and `validate` commands. See [distributed linker usage](docs/linker.md).
 
 `Graph` declares typed places and named architecture references with explicit port bindings. An `Entity` declares ordered typed inputs/outputs. An `Architecture` implements an entity using either a Go implementation key or another graph. Functions live in a separate implementation registry; graphs, libraries, and flattened executable graphs serialize with `encoding/json`.
 
@@ -57,4 +61,28 @@ Tokens hash a type tag, a zero separator, and normalized JSON using SHA-256. Obj
 
 Place-based subgraph traversal/closure policies, immutable definition revision storage, language-independent token canonicalization, and default error handling remain undecided. Composite architecture timeouts are rejected: lowering a whole-graph deadline to individual transitions would change semantics. Entities currently require nonempty inputs and outputs with distinct port names; self-loops bind separate input/output ports to the same place.
 
-Next smallest milestone: specify and test place-based subgraph selection with transition closure and typed boundaries. There is no separate Slice model. GraphML/yEd layout round-tripping, Mermaid import/export, cloud adapters, persistence, UI, and Collator are deferred.
+The distributed linker supports explicit graph references and namespace/place bindings. File syntax for entity contracts and architecture alternatives remains undecided; existing Go `Library` behavior is preserved. Place-based traversal with transition closure also remains open. There is no separate Slice model. GraphML/yEd layout round-tripping, Mermaid import/export, cloud adapters, persistence, UI, and Collator are deferred.
+
+## yEd / GraphML import
+
+GraphML now enters the existing YAML linking pipeline. Explicit `meshwork.*` custom properties define computational nodes; optional `--yed` shape/label conventions support manual authoring. Presentation and original XML stay separate from canonical semantics. GraphML discovery is opt-in with `--graphml-root`.
+
+```powershell
+go run ./cmd/meshwork import ./linker/testdata/graphml/graph.nand.graphml
+go run ./cmd/meshwork validate ./linker/testdata/graphml/graph.nand.graphml
+go run ./cmd/meshwork import ./linker/testdata/graphml/graph.nand.graphml --format yaml
+go run ./cmd/meshwork link ./linker/testdata/graphml --graphml-root ./linker/testdata/graphml
+```
+
+Imports retain incomplete declarations with diagnostics; structural conflicts always fail. CLI link/validate and runtime instantiation prevent unresolved definitions from being treated as executable. File-level architecture/entity references remain unresolved metadata pending a contract resolver. See [GraphML properties, APIs, limits and fixtures](docs/linker.md#graphml-and-yed).
+
+## Semantic comparison
+
+Compare independently resolved GraphML or YAML files, or two workspace directories:
+
+```powershell
+go run ./cmd/meshwork diff ./linker/testdata/graphml/graph.nand.graphml ./linker/testdata/graphml/graph.nand.meshwork.yaml
+go run ./cmd/meshwork diff ./linker/testdata/graphml ./linker/testdata/graphml --format json
+```
+
+Text is the default; `--format text|json` and opt-in `--yed` may precede or follow the paths. Differences are successful comparisons (exit zero); parsing, linking, structural errors and output failures return errors. See [the comparison contract](docs/linker.md#semantic-comparison) for identities, provenance, incomplete inputs and API use.
