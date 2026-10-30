@@ -39,6 +39,25 @@ func TestManualClockScenarioFixture(t *testing.T) {
 		t.Fatal("scenario modified definitions")
 	}
 }
+
+func TestScenarioStopsWhenExpectationArrives(t *testing.T) {
+	g := meshwork.Graph{Places: []meshwork.Place{{Name: "/A", Type: "Bool"}, {Name: "/Q", Type: "Bool"}, {Name: "/unused", Type: "Bool"}, {Name: "/other", Type: "Bool"}}, Transitions: []meshwork.AtomicTransition{
+		{Name: "/wanted", Implementation: "wanted", Inputs: []string{"/A"}, Outputs: []string{"/Q"}, InputPorts: []string{"A"}, OutputPorts: []string{"Q"}},
+		{Name: "/unrelated", Implementation: "unrelated", Inputs: []string{"/unused"}, Outputs: []string{"/other"}, InputPorts: []string{"unused"}, OutputPorts: []string{"other"}},
+	}}
+	in, _ := meshwork.NewToken("Bool", true)
+	want, _ := meshwork.NewToken("Bool", false)
+	s := Scenario{Name: "early", Source: "test", Marking: map[string]meshwork.Token{"/A": in}, Expect: map[string]meshwork.Token{"/Q": want}}
+	_, err := RunScenario(context.Background(), g, s, map[string]meshwork.Compute{
+		"wanted": func(context.Context, map[string]meshwork.Token) (map[string]meshwork.Token, error) {
+			return map[string]meshwork.Token{"Q": want}, nil
+		},
+		"unrelated": func(context.Context, map[string]meshwork.Token) (map[string]meshwork.Token, error) { return nil, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 func TestTimeoutDeclarationsAndExport(t *testing.T) {
 	base := "namespace: /n\nplaces: {A: Bool, Q: Bool}\ntransitions: {work: {implementation: work%s}}\narcs: [[A,work],[work,Q]]\n"
 	for _, tc := range []struct {

@@ -13,3 +13,5 @@ Semantic diff compares graphs at one resolution stage, ignoring presentation. Se
 Runtime execution consumes tokens; explicit duplication provides fan-out. Output locks never act like promised tokens. Failure or timeout preserves input marking and releases reservations/locks. External effects cannot be rolled back. Graph-defined deadlines default to infinite; scenarios can inject manual clocks and supply Duration/Clock tokens to ordinary timeout-control graphs.
 
 Manual scenarios process due work and runnable transitions before assertions. Steps can inspect actual marking at 29, 30 and 31 seconds without waiting for elapsed wall time. Each transition fires at most once; the last explicit step stops the run and releases pending reservations. Default error handling and broader scheduling remain product decisions.
+
+For shell/process composition, the persistent adapter treats graph topology as its boundary: source places are writable ingress and sink places are drained egress. NDJSON frames identify the selected place and JSON value. A parent process owns service lifetime; EOF leaves the session running and no network listener is implied.

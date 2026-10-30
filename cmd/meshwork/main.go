@@ -13,6 +13,7 @@ import (
 
 	distributed "example.com/meshwork-prototype/examples/distributed"
 	"example.com/meshwork-prototype/linker"
+	"example.com/meshwork-prototype/plugins"
 )
 
 type repositories []linker.Repository
@@ -233,38 +234,12 @@ func runInput(args []string, in io.Reader, out io.Writer) error {
 			return err
 		}
 		matched := false
-		stdio := false
 		for _, s := range result.Scenarios {
 			if !strings.HasPrefix(s.Source, target+":") {
 				continue
 			}
 			matched = true
-			if s.Input == "stdin" {
-				if stdio {
-					return fmt.Errorf("stdin scenario file must contain exactly one scenario")
-				}
-				stdio = true
-				var err error
-				s, err = linker.WithStdinMarking(s, result.Definitions[s.Graph], in)
-				if err != nil {
-					return err
-				}
-			}
-			runtime, err := linker.RunScenario(context.Background(), result.Definitions[s.Graph], s, distributed.Implementations())
-			if err != nil {
-				return err
-			}
-			if s.Output != "" {
-				token, ok := runtime.Token(s.Output)
-				if !ok {
-					return fmt.Errorf("scenario %s produced no token at output %s", s.Name, s.Output)
-				}
-				if _, err := fmt.Fprintln(out, string(token.Data)); err != nil {
-					return err
-				}
-				continue
-			}
-			if _, err := fmt.Fprintf(out, "passed: %s\n", s.Name); err != nil {
+			if err := plugins.ExecuteScenario(context.Background(), plugins.ExecutionRequest{Graph: result.Definitions[s.Graph], Scenario: s, Implementations: distributed.Implementations(), Input: in, Output: out}, plugins.BuiltIns()...); err != nil {
 				return err
 			}
 		}

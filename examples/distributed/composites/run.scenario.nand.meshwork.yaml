@@ -1,4 +1,4 @@
 graph: logic.nand
 name: example
 input: stdin
-output: Q
+output: stdout

@@ -313,3 +313,24 @@ func TestConsumerUsesActualUnreservedTokenDespiteOutputLock(t *testing.T) {
 		t.Fatal("missing output")
 	}
 }
+
+func TestTakeRequiresAnUnreservedToken(t *testing.T) {
+	r := New()
+	if err := r.AddPlace(Place{Name: "/out", Type: "Bool"}); err != nil {
+		t.Fatal(err)
+	}
+	tok, err := NewToken("Bool", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Put("/out", tok); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := r.Take("/out")
+	if err != nil || !ok || got.Hash != tok.Hash {
+		t.Fatalf("take: %v %v %v", got, ok, err)
+	}
+	if _, ok := r.Token("/out"); ok {
+		t.Fatal("take did not clear place")
+	}
+}

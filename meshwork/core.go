@@ -165,7 +165,7 @@ func (r *Runtime) Put(name string, t Token) error {
 		return fmt.Errorf("place %s expects %s, got %s", name, p.definition.Type, t.Type)
 	}
 	if p.token != nil || p.outputOwner != 0 || p.inputOwner != 0 {
-		return fmt.Errorf("place unavailable %s", name)
+		return fmt.Errorf("%w %s", ErrPlaceUnavailable, name)
 	}
 	cp := t.Clone()
 	p.token = &cp
@@ -212,7 +212,37 @@ func (r *Runtime) Snapshot() []Snapshot {
 	return result
 }
 
-var ErrNotEnabled = errors.New("transition not enabled")
+var (
+	ErrNotEnabled       = errors.New("transition not enabled")
+	ErrPlaceUnavailable = errors.New("place unavailable")
+)
+
+// Changed closes whenever the marking or active reservations change.
+func (r *Runtime) Changed() <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.changed
+}
+
+// Take removes and returns an unreserved token. Callers use it only for declared egress places.
+func (r *Runtime) Take(name string) (Token, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.places[name]
+	if !ok {
+		return Token{}, false, fmt.Errorf("unknown place %s", name)
+	}
+	if p.token == nil {
+		return Token{}, false, nil
+	}
+	if p.inputOwner != 0 || p.outputOwner != 0 {
+		return Token{}, false, ErrPlaceUnavailable
+	}
+	t := p.token.Clone()
+	p.token = nil
+	r.notifyLocked()
+	return t, true, nil
+}
 
 // Fire starts one attempt and waits for its atomic commit or finalized failure.
 func (r *Runtime) Fire(parent context.Context, name string) error {

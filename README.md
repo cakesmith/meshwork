@@ -17,15 +17,15 @@ go run ./cmd/meshwork execute --scenario ./examples/distributed/composites/tests
 go run ./cmd/meshwork validate ./examples/timing
 ```
 
-Build the CLI and run its stdin/stdout NAND adapter with ordinary shell redirection:
+Build the CLI and run its persistent stdin/stdout NAND adapter with ordinary shell redirection:
 
 ```powershell
 go build -o meshwork.exe ./cmd/meshwork
-'{A: true, B: true}' | .\meshwork.exe execute --scenario ./examples/distributed/composites/run.scenario.nand.meshwork.yaml
-# false
+'{"place":"A","value":true}' | .\meshwork.exe execute --scenario ./examples/distributed/composites/run.scenario.nand.meshwork.yaml
+# keeps running; send B on the same stream to receive {"place":"/logic/nand/Q","value":false}
 ```
 
-That singular scenario declares `input: stdin` and `output: Q`. Stdin must be one YAML mapping of known graph places; its final `Q` token is written as canonical JSON to stdout. Invalid input or execution failure exits nonzero and emits no result token.
+That singular scenario declares `input: stdin` and `output: stdout`. It is a persistent NDJSON adapter: each stdin line is `{ "place": "NAME", "value": JSON }`, accepted only for graph source places; each graph sink token is emitted as NDJSON and removed after emission. It runs until its parent terminates it; EOF does not end the session.
 
 The demo prints all four correct OR results, using two duplication and three NAND transitions. Distributed validation reports 42 places, 23 transitions and 17 NAND/OR/MUX scenarios; timing validation reports 3 places, 1 transition and 2 scenarios. CLI validation never executes implementation code. Tests execute the scenarios through the Go API. The race detector requires a supported C compiler.
 

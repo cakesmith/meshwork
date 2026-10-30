@@ -9,5 +9,7 @@ Transition implementations belong to the consuming project, beside the graph YAM
 
 Transition timeouts are graph definitions and default to infinite. Real/manual injected clocks, unique attempt identities, atomic deadline/commit decisions, ordinary timeout-control/delay graphs and deterministic manual-clock scenario steps are required. Deadline equality currently expires the attempt; this convention is provisional. Late results cannot commit after expiration.
 
+Finite scenarios with `expect` complete as soon as all expected places hold tokens, returning pass/fail from the expected marking. A singular `input: stdin`, `output: stdout` scenario is instead a persistent CLI adapter: graph source places accept NDJSON tokens and graph sink tokens are emitted as NDJSON until its parent terminates the process.
+
 ## Exclusions and remaining decisions
 No GraphML XML rewriting/synchronization, cloud adapters, distributed scheduler, automatic retries/backoff, arbitrary promises, new vertex kinds, UI or Collator code. Default runtime error policy and final tie-breaking convention remain undecided. General cyclic/reactive scheduling, expected-failure scenario assertions, immutable revisions, numeric normalization and place-selection traversal remain future work.

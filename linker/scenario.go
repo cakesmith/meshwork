@@ -1,16 +1,13 @@
 package linker
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"time"
 
 	"example.com/meshwork-prototype/meshwork"
-	"gopkg.in/yaml.v3"
 )
 
 type Scenario struct {
@@ -19,6 +16,7 @@ type Scenario struct {
 	Clock               ClockSpec
 	Steps               []Step
 	Input, Output       string
+	Ingress, Egress     []string
 	inputNamespace      string
 	inputBindings       map[string]string
 }
@@ -79,15 +77,37 @@ func resolveScenarios(s *source, ns string, g meshwork.ExecutableGraph) ([]Scena
 		}
 		seen[c.Name] = true
 		if c.Input != "" || c.Output != "" {
-			if s.File.Kind != "scenario" || c.Input != "stdin" || c.Output == "" || c.Marking != nil || c.Expect != nil {
-				return nil, fmt.Errorf("%s: stdin scenarios require singular input: stdin, output: PLACE, and no marking or expect", location)
+			if s.File.Kind != "scenario" || c.Input != "stdin" || c.Output != "stdout" || c.Marking != nil || c.Expect != nil || len(c.Steps) != 0 || config.Type == "manual" {
+				return nil, fmt.Errorf("%s: streaming scenarios require singular input: stdin, output: stdout, and no marking, expect, or steps", location)
 			}
 		}
-		item := Scenario{Clock: config, Name: c.Name, Graph: ns, Source: location, Marking: map[string]meshwork.Token{}, Expect: map[string]meshwork.Token{}, Input: c.Input}
+		item := Scenario{Clock: config, Name: c.Name, Graph: ns, Source: location, Marking: map[string]meshwork.Token{}, Expect: map[string]meshwork.Token{}, Input: c.Input, Output: c.Output}
 		if c.Input == "stdin" {
 			item.inputNamespace, item.inputBindings = ns, s.Doc.Bindings
+			producers, consumers := map[string]bool{}, map[string]bool{}
+			for _, t := range g.Transitions {
+				for _, n := range t.Inputs {
+					consumers[n] = true
+				}
+				for _, n := range t.Outputs {
+					producers[n] = true
+				}
+			}
+			for _, p := range g.Places {
+				if !producers[p.Name] {
+					item.Ingress = append(item.Ingress, p.Name)
+				}
+				if !consumers[p.Name] {
+					item.Egress = append(item.Egress, p.Name)
+				}
+			}
+			sort.Strings(item.Ingress)
+			sort.Strings(item.Egress)
+			if len(item.Ingress) == 0 || len(item.Egress) == 0 {
+				return nil, fmt.Errorf("%s: streaming scenario requires graph source and sink places", location)
+			}
 		}
-		if c.Output != "" {
+		if c.Output != "" && c.Output != "stdout" {
 			n, err := boundName(&local, c.Output)
 			if err != nil {
 				return nil, fmt.Errorf("%s: scenario %s: %w", location, c.Name, err)
@@ -167,54 +187,9 @@ func resolveScenarios(s *source, ns string, g meshwork.ExecutableGraph) ([]Scena
 	return result, nil
 }
 
-const maxScenarioInput = 1 << 20
-
-// WithStdinMarking validates one YAML mapping and returns a scenario with that marking.
-func WithStdinMarking(s Scenario, g meshwork.ExecutableGraph, in io.Reader) (Scenario, error) {
-	if s.Input != "stdin" {
-		return Scenario{}, fmt.Errorf("scenario %s does not accept stdin", s.Name)
-	}
-	b, err := io.ReadAll(io.LimitReader(in, maxScenarioInput+1))
-	if err != nil {
-		return Scenario{}, err
-	}
-	if len(b) > maxScenarioInput {
-		return Scenario{}, fmt.Errorf("scenario stdin exceeds %d bytes", maxScenarioInput)
-	}
-	values := map[string]any{}
-	d := yaml.NewDecoder(bytes.NewReader(b))
-	if err := d.Decode(&values); err != nil {
-		return Scenario{}, fmt.Errorf("scenario stdin must be a YAML mapping: %w", err)
-	}
-	var extra any
-	if err := d.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return Scenario{}, errors.New("scenario stdin must contain one YAML document")
-		}
-		return Scenario{}, err
-	}
-	types := map[string]string{}
-	for _, p := range g.Places {
-		types[p.Name] = p.Type
-	}
-	local := source{NS: s.inputNamespace, Doc: document{Bindings: s.inputBindings}}
-	s.Marking = map[string]meshwork.Token{}
-	for _, key := range sortedKeys(values) {
-		name, err := boundName(&local, key)
-		if err != nil {
-			return Scenario{}, err
-		}
-		typ := types[name]
-		if typ == "" {
-			return Scenario{}, fmt.Errorf("scenario stdin references unknown place %s", name)
-		}
-		token, err := meshwork.NewToken(typ, values[key])
-		if err != nil {
-			return Scenario{}, fmt.Errorf("scenario stdin place %s: %w", name, err)
-		}
-		s.Marking[name] = token
-	}
-	return s, nil
+// ResolveInput resolves a stream frame's place name through this scenario's bindings.
+func (s Scenario) ResolveInput(name string) (string, error) {
+	return boundName(&source{NS: s.inputNamespace, Doc: document{Bindings: s.inputBindings}}, name)
 }
 
 // RunScenario runs a finite example on an isolated marking. Each transition fires
@@ -238,6 +213,9 @@ func RunScenario(ctx context.Context, g meshwork.ExecutableGraph, s Scenario, im
 			return nil, err
 		}
 	}
+	if expectationsReady(r, s.Expect) {
+		return r, checkExpect(r, s, s.Expect, nil)
+	}
 	pending := append([]meshwork.AtomicTransition(nil), g.Transitions...)
 	for len(pending) > 0 {
 		next := make([]meshwork.AtomicTransition, 0, len(pending))
@@ -252,6 +230,9 @@ func RunScenario(ctx context.Context, g meshwork.ExecutableGraph, s Scenario, im
 			}
 			if err != nil {
 				return nil, fmt.Errorf("%s: scenario %s: %w", s.Source, s.Name, err)
+			}
+			if expectationsReady(r, s.Expect) {
+				return r, checkExpect(r, s, s.Expect, nil)
 			}
 		}
 		if len(next) == len(pending) {
@@ -288,6 +269,18 @@ func checkExpect(r *meshwork.Runtime, s Scenario, values map[string]meshwork.Tok
 		}
 	}
 	return nil
+}
+
+func expectationsReady(r *meshwork.Runtime, values map[string]meshwork.Token) bool {
+	if len(values) == 0 {
+		return false
+	}
+	for _, n := range sortedKeys(values) {
+		if _, ok := r.Token(n); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func runManualScenario(parent context.Context, g meshwork.Graph, s Scenario, impl map[string]meshwork.Compute) (*meshwork.Runtime, error) {

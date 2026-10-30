@@ -2,11 +2,21 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+var errStopStream = errors.New("stop stream")
+
+type stopWriter struct{ bytes.Buffer }
+
+func (w *stopWriter) Write(p []byte) (int, error) {
+	_, _ = w.Buffer.Write(p)
+	return len(p), errStopStream
+}
 
 func TestCommands(t *testing.T) {
 	for _, cmd := range []string{"discover", "link", "validate"} {
@@ -66,12 +76,12 @@ func TestExecuteScenarioFile(t *testing.T) {
 }
 
 func TestExecuteStdinScenario(t *testing.T) {
-	var out bytes.Buffer
-	err := runInput([]string{"execute", "--scenario", "../../examples/distributed/composites/run.scenario.nand.meshwork.yaml"}, strings.NewReader("{A: true, B: true}\n"), &out)
-	if err != nil || out.String() != "false\n" {
+	out := &stopWriter{}
+	err := runInput([]string{"execute", "--scenario", "../../examples/distributed/composites/run.scenario.nand.meshwork.yaml"}, strings.NewReader("{\"place\":\"A\",\"value\":true}\n{\"place\":\"B\",\"value\":true}\n"), out)
+	if !errors.Is(err, errStopStream) || out.String() != "{\"place\":\"/logic/nand/Q\",\"value\":false}\n" {
 		t.Fatalf("output %q, error %v", out.String(), err)
 	}
-	for _, input := range []string{"{A: true, extra: false}", "- true", "{A: true}\n---\n{B: true}"} {
+	for _, input := range []string{"{A: true}", "{\"place\":\"extra\",\"value\":false}", "{\"place\":\"A\"}"} {
 		if err := runInput([]string{"execute", "--scenario", "../../examples/distributed/composites/run.scenario.nand.meshwork.yaml"}, strings.NewReader(input), &bytes.Buffer{}); err == nil {
 			t.Fatal("accepted invalid stdin", input)
 		}

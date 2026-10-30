@@ -111,10 +111,10 @@ A singular scenario can be a shell adapter instead of a fixed test case:
 graph: logic.nand
 name: example
 input: stdin
-output: Q
+output: stdout
 ```
 
-`input: stdin` requires `output: PLACE` and forbids fixed `marking` and `expect`. The process reads one YAML mapping from stdin, validates every name against the selected graph and constructs its token with that place's declared type. The final selected token is emitted as its canonical JSON payload on stdout; redirect either stream to use a file. Bad YAML, multiple documents, unknown places, oversized input, stalled computation, or a missing output token is an error, so the process exits nonzero without a successful output value.
+`input: stdin` requires `output: stdout` and forbids fixed `marking`, `expect`, and steps. It is a persistent NDJSON adapter: every input line is `{ "place": "NAME", "value": JSON }` and may target only a graph source place; every graph sink token is emitted as `{ "place": "RESOLVED_NAME", "value": JSON }`, then removed. An occupied input waits for space (backpressure). EOF does not end the session; its parent terminates it. Malformed JSON, unknown/internal places, output-write failures, and runtime failures exit nonzero.
 
 Scenarios can live in any configured repository. They never become reusable graph declarations. The included distributed example can execute a selected scenario source file through the CLI:
 

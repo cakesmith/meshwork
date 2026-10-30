@@ -91,3 +91,27 @@ Before each new request, read this file and relevant code/technical context. Upd
 - Linking rejects malformed adapter declarations, including a non-stdin mode, a missing output, plural scenarios, or fixed `marking`/`expect`. `linker.WithStdinMarking` validates the received document before runtime instantiation: one mapping/document, at most 1 MiB, known resolved places and declared nominal token types. Execution/runtime/output absence still returns an error, so the CLI process exits nonzero and prints no success value.
 - Converted `examples/distributed/composites/run.scenario.nand.meshwork.yaml` to the adapter (`input: stdin`, `output: Q`), added CLI regressions for a valid NAND input and malformed/unknown/multiple-document inputs, and documented build/piping usage in README.md and docs/linker.md.
 - Validation passed with workspace-local caches: `go test ./... -count=1`, `go vet ./...`, `'{A: true, B: true}' | go run ./cmd/meshwork execute --scenario ./examples/distributed/composites/run.scenario.nand.meshwork.yaml` (prints `false`), and `git diff --check`.
+
+## Stdio-to-port feasibility review (2026-10-29)
+- No application code changed. The existing adapter is deliberately one-shot: it reads one bounded (1 MiB) YAML mapping from stdin, executes, and writes one final canonical JSON payload to stdout.
+- Shell redirection alone cannot bind TCP/UDP ports. A separate supervised bridge process may listen on a loopback TCP connection, pass the received request bytes to one `meshwork execute` child stdin, and return that child stdout on the same connection. Separate ingress and egress listeners require request/response correlation and lifecycle rules, so they are not an equivalent simple reroute.
+- Do not expose such a bridge beyond loopback without authentication, resource/concurrency limits, framing/EOF semantics, and an explicit protocol; it would execute user-controlled scenario inputs.
+
+## Persistent stdin/stdout execution adapter (2026-10-29)
+- Replaced the one-shot YAML stdin adapter with a singular streaming scenario contract: `input: stdin`, `output: stdout`, no fixed marking/expect/steps/manual clock. Graph source places are ingress and graph sink places are egress; both directions use NDJSON `{ "place": "NAME", "value": JSON }` frames. EOF deliberately does not stop the process; its parent must terminate it.
+- Finite `expect` scenarios now return as soon as every expected place has a token, comparing the complete expected marking then. They no longer require unrelated transitions to become enabled or finish.
+- Added runtime `Changed` and atomic `Take` support. Service inputs respect occupied-place backpressure; service output is written before the sink token is removed. Internal places cannot be injected or drained.
+- Migrated the distributed NAND adapter scenario and README/linker documentation. Added CLI stream framing/error regression, finite early-expect regression, and runtime take regression.
+- Validation passed using workspace-local Go caches: `go test ./... -count=1`, `go test -race ./... -count=1`, `go vet ./...`, and `git diff --check`.
+
+## Scenario execution plugins (2026-10-29)
+- Added `linker/execution_plugins.go`: the CLI now delegates every selected scenario to `linker.ExecuteScenario`; it no longer switches on stdin/stdout behavior in `cmd/meshwork/main.go`.
+- Exactly one enabled `ExecutorPlugin` owns execution. `TestExecutionPlugin` enables for top-level or step expectations and retains finite pass output; `StreamExecutionPlugin` enables otherwise and owns persistent NDJSON execution. Enabled `ExecutionObserver` plugins run before/after the selected executor, providing the extension point for simultaneous metrics and other cross-cutting plugins.
+- Added host regression coverage for observer ordering, executor exclusivity, and built-in selection. Existing finite and stream CLI regressions remain green.
+- Validation passed using workspace-local Go caches: `go test ./... -count=1`, `go test -race ./... -count=1`, `go vet ./...`, and `git diff --check`.
+
+## Plugin package boundary (2026-10-29)
+- Moved the execution-plugin host, test executor, stream executor, and their tests from `linker/` into the root `plugins/` package. The dependency direction is now `cmd/meshwork -> plugins -> linker -> meshwork`; linker does not import plugins.
+- `linker.Scenario.ResolveInput` is the only new linker-facing helper for the stream plugin, preserving resolved scenario bindings without exposing linker parser internals. `linker.RunScenario` remains the finite execution primitive used by the test plugin.
+- `cmd/meshwork` composes `plugins.BuiltIns()` and calls `plugins.ExecuteScenario`; stream handling is no longer in linker or the command switch. Plugin host regression coverage moved with the package.
+- Validation passed using workspace-local Go caches: `go test ./... -count=1`, `go test -race ./... -count=1`, `go vet ./...`, and `git diff --check`.
