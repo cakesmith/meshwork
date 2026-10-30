@@ -1,0 +1,11 @@
+namespace: /remote/nand
+places:
+  A: {type: Bool}
+  B: {type: Bool}
+  Q: {type: Bool}
+transitions:
+  nand: {implementation: logic.nand.go, timeout: 10s}
+arcs:
+  - {from: A, to: nand, port: A, transport: http-json}
+  - {from: B, to: nand, port: B, transport: http-json}
+  - {from: nand, to: Q, port: Q, transport: http-json}

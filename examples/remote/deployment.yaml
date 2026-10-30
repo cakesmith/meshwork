@@ -1,0 +1,11 @@
+authority:
+  listen: 127.0.0.1:0
+default_executor: worker
+executors:
+  worker:
+    type: http-json
+    endpoint: http://127.0.0.1:8081
+    token_env: MESHWORK_EXECUTOR_TOKEN
+# Overrides use canonical transition names:
+transitions:
+  /remote/nand/nand: worker

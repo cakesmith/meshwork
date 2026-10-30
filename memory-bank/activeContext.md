@@ -1,7 +1,7 @@
 # Active Context
 
 ## State
-ARCHITECTURAL_SYNCHRONIZATION_VERIFIED (2026-10-29). Authoritative handoff implemented and final checks passed. Existing memory-bank was read before application edits; systemPatterns.md/techContext.md were updated before architectural changes. Earlier Portfolio/multiset designs do not override this typed, strictly bipartite, 1-safe Go model.
+REMOTE_EXECUTION_FOUNDATION_VERIFIED (2026-10-30). Explicit places/ports, arc transport bindings, per-transition executor selection and the first single-authority remote execution path are implemented and validated. See the latest milestone below and docs/remote-execution.md. Earlier milestone entries describe their historical state; broader language-independent linker/runtime contracts remain proposed.
 
 ## Changes in this milestone
 - meshwork/graph.go and logic.go: removed Entity/Architecture and both registries; Graph now contains places, transitions and direct references. ExecutableGraph aliases Graph. Library.Graphs, Link/Flatten/Compose provide explicit graph selection, namespace/name bindings, deterministic normalization and preserved sharing. Linked stage retains references; flattened stage expands them.
@@ -33,10 +33,33 @@ No Go/dependency changes, staging or commits. All 26 requested invariant/behavio
 ## Grounding protocol
 Before each new request, read this file and relevant code/technical context. Update systemPatterns.md or techContext.md before architectural edits. Record discrepancies immediately and update this state at milestones/closure; provide the human a memory-update checklist.
 
+## CLI walkthrough (2026-10-30)
+- Inspected `cmd/meshwork/main.go`, its CLI tests, `cmd/meshwork/diff.go`, and the execution-plugin host to explain the command boundary. No application code or architecture changed.
+- The CLI is a thin adapter: it parses user-facing commands and flags, discovers/links inputs through `linker`, delegates selected scenario execution to `plugins`, and converts returned errors into stderr plus exit code 1. Core runtime behavior remains outside this file.
+
+## Distributed demo walkthrough (2026-10-30)
+- Corrected the walkthrough target to `examples/distributed/demo/main.go`. No application code or architecture changed.
+- The demo links the distributed primitives and composites, selects the flattened `composites:or` graph, binds consumer-owned NAND and fan-out functions, and executes all four OR truth-table inputs using an intentionally bounded acyclic firing loop.
+
+## Distributed OR scenario walkthrough (2026-10-30)
+- Inspected `examples/distributed/composites/tests/tests.scenarios.or.meshwork.yaml` and the finite scenario runner. No application code or architecture changed.
+- The YAML is a four-case, declarative acceptance specification for `composites:or`: each case supplies A/B initial tokens and asserts Q. It uses the same bounded, acyclic firing rule as the demo, but `RunScenario` owns setup, progress detection, and expectation checking.
+
+## Remove redundant distributed demo (2026-10-30)
+- Deleted `examples/distributed/demo/main.go` and its empty directory. The OR truth-table scenario fixture is now the sole executable demonstration of that graph.
+- Removed the README demo invocation and updated system/technical context to describe CLI scenario execution as the retained consumer-registry path.
+- Validation passed with workspace-local caches: `go run ./cmd/meshwork execute --scenario ./examples/distributed/composites/tests/tests.scenarios.or.meshwork.yaml` (four passing cases), `go test ./... -count=1`, `go vet ./...`, and `git diff --check`.
+
 ## Latest inspection (2026-10-29)
 - Moved linker compatibility details (obsolete entity/architecture rejection, mixed-source completion and effective-timeout conflicts) from docs/linker.md into the memory bank. The public GraphML key table now labels `meshwork.implementation` only as the transition implementation; registry/path mechanics remain internal context.
 - Removed relative implementation-source normalization. `implementation`/`meshwork.implementation` is now opaque end to end: `./Nand.kt#compute` remains that literal key and is resolved only from the caller's `map[string]Compute` at instantiation. No linker reads, validates or derives a source path.
 - Validation after this edit: `go test ./linker ./meshwork -count=1` and `git diff --check` passed using workspace-local Go caches.
+
+## Documentation walkthrough refactor (2026-10-30)
+- Restructured README.md as a progressive usage guide: validate primitive NAND, execute NAND, reuse it for OR, compose MUX, then use the persistent stdin/stdout adapter. Each step links directly to its graph, scenario, manifest, demo, or consumer implementation source.
+- Moved the concise explanation of Meshwork's model, composition, runtime, consumer implementation boundary, scenarios, GraphML role, and known boundaries into docs/overview.md. README ends with a short operational overview and links to overview, linker, and timing documentation.
+- Described Meshwork as a toolkit currently implemented in Go, rather than a Go toolkit, in both README.md and docs/overview.md.
+- No Go, YAML, CLI, dependency, or runtime behavior changed. Next documentation work should keep README examples executable and place conceptual/reference material under docs/.
 
 ## Documentation boundary adjustment (2026-10-29)
 - Removed "registry key" implementation mechanics from the public GraphML property table. `meshwork.implementation` remains required runtime identity, not a relative source path: `Instantiate` uses it to choose the consumer-supplied `map[string]Compute` function. Its opaque-key rule and source-file convention remain in system/technical memory context only.
@@ -115,3 +138,54 @@ Before each new request, read this file and relevant code/technical context. Upd
 - `linker.Scenario.ResolveInput` is the only new linker-facing helper for the stream plugin, preserving resolved scenario bindings without exposing linker parser internals. `linker.RunScenario` remains the finite execution primitive used by the test plugin.
 - `cmd/meshwork` composes `plugins.BuiltIns()` and calls `plugins.ExecuteScenario`; stream handling is no longer in linker or the command switch. Plugin host regression coverage moved with the package.
 - Validation passed using workspace-local Go caches: `go test ./... -count=1`, `go test -race ./... -count=1`, `go vet ./...`, and `git diff --check`.
+
+## Plugin authoring walkthrough (2026-10-30)
+- Inspected `plugins/execution.go`, plugin host tests, the CLI composition call, and scenario interfaces to explain executor and observer authoring. No application code or architecture changed.
+- Plugins are Go values explicitly passed to `ExecuteScenario`; the existing CLI uses only `BuiltIns()`. Exactly one enabled executor is required, while enabled observers wrap execution in registration order and unwind in reverse. A custom executor must avoid overlapping the built-in selection or replace the built-in set.
+- Next: implement and explicitly compose a consumer plugin if a concrete integration is requested; preserve cancellation and executor exclusivity.
+
+## Independently shareable scenario plugins (2026-10-30)
+- Moved the scenario plugin contract and host to `plugins/api`, and built-in test and stream executors to `plugins/testexec` and `plugins/streamexec`. The root `plugins` package preserves its existing types, `BuiltIns`, and `ExecuteScenario` as a compatibility facade. No graph, scenario schema, or CLI behavior changed.
+- Added the graph-independent `examples/plugins/report` observer, an external-package composition regression, and `docs/plugins.md`; README links to the guide. Plugins are ordinary explicitly composed Go packages, separate from graph repository linking and consumer implementation registries.
+- Validation passed: `go test ./... -count=1`, `go test -race ./... -count=1`, `go vet ./...`, and `git diff --check`, using workspace-local caches. No plugin publishing or dynamic loading was attempted.
+- Next: choose a real module location before publishing packages; design adapter-specific scenario configuration separately if needed. Existing built-ins cover all scenarios, so custom executors require a non-overlapping set.
+
+## Language-independent compiled effects investigation (2026-10-30)
+- Inspected transition `Compute`, graph implementation binding, scenario plugin interfaces, timing implementations, and runtime attempt handling. No application code or architecture was changed.
+- The existing Go plugin packages do not provide a language-neutral contract. Transition effects receive typed tokens and Go context; timeout/delay also use runtime clock and attempt capabilities carried in context. Scenario executors and observers currently receive Go objects and have a distinct lifecycle. A token-only subprocess protocol would not preserve all existing effects.
+- Pending user choice: process protocol versus native ABI versus architecture first, and whether the initial language-neutral boundary covers transition effects alone or also scenario executors/observers. Preserve graph identity, deterministic linking, cancellation, manual clocks and attempt supervision when designing the boundary.
+
+## Language-independent plugin architecture (2026-10-30)
+- User chose architecture first with no transport implementation, covering every compiled component including linker and runtime. Added `docs/plugin-architecture.md` with roles, bootstrap, separate graph and plugin channels, capability and atomicity requirements, migration and conformance plan. Linked the proposal from `docs/plugins.md`.
+- Updated projectBrief, productContext, systemPatterns and techContext to distinguish this target from the current Go implementation. No application code, transport, schema or runtime behavior changed.
+- Next: specify portable canonical token/value/hash rules and versioned operations, then choose transport, distribution, bootstrap and security/resource behavior before claiming interoperability. Preserve existing Go APIs and runtime invariants during migration.
+- Validation: reviewed the proposal against the current graph, linker, attempt, timing and scenario interfaces; `git diff --check` passed. No code tests were run for this documentation-only milestone.
+
+## Provenance and presentation explanation (2026-10-30)
+- Reviewed `Result.Sources`, GraphML import metadata and semantic diff documentation to explain sidecars. No application code or architecture changed.
+- Provenance records source locations; presentation records imported diagram information and raw XML. Neither enters semantic comparison after import, though opt-in yEd conventions can use visual cues during import. Next focus remains specifying portable plugin contracts.
+
+## Transition executors and arc transports proposal (2026-10-30)
+- Updated `docs/plugin-architecture.md` to capture the user's per-transition compiled executor, default/override and arc transport model. Output ports may negotiate serialization and listen; input ports connect and receive, with locality optimizations. Scenario executors remain distinct.
+- Recorded the two arcs and intervening 1-safe place, competition rather than implicit broadcast, and the unresolved place authority, transport rendezvous, distributed commit/recovery, partitions and configuration boundaries. Updated systemPatterns and techContext; no application code, transport or schema changed.
+- Next: decide place ownership and the atomic firing/transport handshake for a minimal distributed example before specifying protocol or implementing it; keep manual clock and late-result behavior in scope.
+- Validation: reviewed the proposal against the current bipartite graph and atomic runtime; `git diff --check` passed. No code tests were run for this architecture-only update.
+
+## Place definition and authority (2026-10-30)
+- User selected a single logical authority for each graph instance's places and firing decisions, with remote transition executors. Added `docs/place.md` defining identity/type, 1-safe marking, reservation and locking, atomic firing, self-loops, competition, source/sink boundaries and failure limitations. Updated the plugin proposal to record the choice.
+- Updated systemPatterns and techContext. Current code was inspected; no application code, protocol, schema or runtime behavior changed. Next specify arc/port delivery and authority/executor handshake, including uncertain outcomes without assuming crash recovery.
+- Validation: checked semantics against `meshwork/core.go` and `meshwork/attempt.go`; `git diff --check` passed. No code tests were run for this design-only work.
+
+## Place and port representation explanation (2026-10-30)
+- Reviewed current `meshwork.Graph`, local port mapping, distributed YAML and proposed place design to explain current versus possible distributed representations. No application code, schema or architecture decision changed.
+- Places currently have name/type; transition input/output ports are local names paired with arc place identities. Distributed arc transport representation and configuration remain undecided; the authority owns per-instance marking and reservations.
+
+## Explicit ports and first distributed execution completed (2026-10-30)
+- Implemented `{type: TYPE}` places and `{from, to, port, transport}` arcs in linker/ports.go and files.go, preserving scalar/pair shorthand. Updated linker/link.go, graphml.go, diff.go and meshwork/graph.go so local ports and opaque transport identities survive composition, canonical export and semantic comparison. Native instantiation refuses undeployed remote transport bindings.
+- Added plugins/remote/{protocol,executor,authority}.go: versioned bounded HTTP/JSON exchange, authenticated executor exports, temporary input capability URLs, proposed output values, explicit default/per-transition deployment binding, and one authoritative in-memory runtime. Added CLI --deployment and interrupt cancellation. Graph.InstantiateExecutors and scenario/runtime factories keep one execution engine for native and remote effects.
+- Added consumer-owned compiled example examples/distributed/executor/main.go, explicit remote graph/scenarios/deployment in examples/remote, and a graph-independent Python reference executor. Added docs/remote-execution.md and updated README, linker/plugin/place/architecture docs and all five Memory Bank documents.
+- Fixed stream progress/backpressure in plugins/streamexec/execution.go: keep a pending input until its place becomes available, immediately rescan after insertion, observe runtime changes before scanning, and cancel active work when returning. A regression executes 21 ordered values through a remote executor with stdin open and checks shutdown.
+- Validation on Go 1.27.3 windows/amd64 with workspace-local caches: go test ./... -count=1, go test -race ./... -count=1, go vet ./..., and git diff --check all passed. Compiled CLI and executor binaries were built under .cache. A separate-process harness passed all four NAND cases with the compiled Go executor and then with the independent Python executor. These interoperability checks ran on one machine, not two physical hosts.
+- Regressions cover remapped port/transport round-trip, conflicting declarations/no partial linked result, transport identities remaining opaque, mixed native/remote place consumption, wrong/missing output ports/types, partial invalid output sets, panic, canceled/late results, transport disconnects, response correlation/version/shape, bounded messages, authentication, executor binding errors and unsupported capabilities.
+- Limits: HTTP/JSON ordinary effects only, one transport family per transition, real clocks for remote effects. Remote runtime-clock/supervision effects and manual-clock scenarios are explicitly rejected; native timing remains available. No automatic retries, durability/failover, artifact deployment or built-in TLS. Use a trusted private network or external TLS. Token hashing remains authority-owned; Boolean interop does not establish cross-language numeric equivalence. Broader runtime/linker/observer plugin protocols remain unimplemented.
+- Next focus: choose capability transport and durable authority/recovery semantics before extending remote timing or availability. Preserve pre-existing .cache and earlier working-tree changes; no staging, commits or dependency/version changes.

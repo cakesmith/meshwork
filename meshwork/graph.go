@@ -28,8 +28,10 @@ type AtomicTransition struct {
 	Implementation          string
 	Inputs, Outputs         []string
 	InputPorts, OutputPorts []string
-	Timeout                 time.Duration `json:",omitempty"`
-	Sources                 []string      `json:",omitempty"`
+	InputTransports         map[string]string `json:",omitempty"`
+	OutputTransports        map[string]string `json:",omitempty"`
+	Timeout                 time.Duration     `json:",omitempty"`
+	Sources                 []string          `json:",omitempty"`
 }
 
 // ExecutableGraph retains the public name for flattened canonical graphs.
@@ -257,6 +259,11 @@ func normalizeGraph(g Graph, requireEndpoints bool) (Graph, error) {
 				return Graph{}, fmt.Errorf("%s: unknown place %s", t.Name, n)
 			}
 		}
+		if err := t.ValidateTransports(); err != nil {
+			return Graph{}, err
+		}
+		t.InputTransports = cloneTransports(t.InputTransports)
+		t.OutputTransports = cloneTransports(t.OutputTransports)
 		t.Inputs, t.InputPorts = sortedPorts(t.Inputs, t.InputPorts)
 		t.Outputs, t.OutputPorts = sortedPorts(t.Outputs, t.OutputPorts)
 		sources := append([]string(nil), t.Sources...)
@@ -324,6 +331,41 @@ func (g Graph) Instantiate(implementations map[string]Compute) (*Runtime, error)
 	return g.InstantiateWithClock(implementations, RealClock{})
 }
 func (g Graph) InstantiateWithClock(implementations map[string]Compute, clock Clock) (*Runtime, error) {
+	return g.instantiate(func(t AtomicTransition) (Compute, error) {
+		if err := t.ValidateTransports(); err != nil {
+			return nil, err
+		}
+		for _, bindings := range []map[string]string{t.InputTransports, t.OutputTransports} {
+			for _, transport := range bindings {
+				if transport != "memory" {
+					return nil, fmt.Errorf("%s: arc transport %s requires an executor binding", t.Name, transport)
+				}
+			}
+		}
+		fn := implementations[t.Implementation]
+		if fn == nil {
+			return nil, fmt.Errorf("%s: unknown implementation %q", t.Name, t.Implementation)
+		}
+		return fn, nil
+	}, clock)
+}
+
+// InstantiateExecutors binds each canonical transition to an explicitly prepared executor.
+// The caller must validate transport compatibility when preparing these bindings.
+func (g Graph) InstantiateExecutors(executors map[string]Compute, clock Clock) (*Runtime, error) {
+	return g.instantiate(func(t AtomicTransition) (Compute, error) {
+		if err := t.ValidateTransports(); err != nil {
+			return nil, err
+		}
+		fn := executors[t.Name]
+		if fn == nil {
+			return nil, fmt.Errorf("%s: missing executor", t.Name)
+		}
+		return fn, nil
+	}, clock)
+}
+
+func (g Graph) instantiate(resolve func(AtomicTransition) (Compute, error), clock Clock) (*Runtime, error) {
 	if len(g.References) != 0 {
 		return nil, fmt.Errorf("flatten graph references before instantiation")
 	}
@@ -342,9 +384,9 @@ func (g Graph) InstantiateWithClock(implementations map[string]Compute, clock Cl
 		t.Outputs = append([]string(nil), t.Outputs...)
 		t.InputPorts = append([]string(nil), t.InputPorts...)
 		t.OutputPorts = append([]string(nil), t.OutputPorts...)
-		fn := implementations[t.Implementation]
-		if fn == nil {
-			return nil, fmt.Errorf("%s: unknown implementation %q", t.Name, t.Implementation)
+		fn, err := resolve(t)
+		if err != nil {
+			return nil, err
 		}
 		if len(t.Inputs) != len(t.InputPorts) || len(t.Outputs) != len(t.OutputPorts) || !unique(t.InputPorts) || !unique(t.OutputPorts) {
 			return nil, fmt.Errorf("%s: invalid port mapping", t.Name)
@@ -376,4 +418,37 @@ func (g Graph) InstantiateWithClock(implementations map[string]Compute, clock Cl
 		}
 	}
 	return r, nil
+}
+
+// ValidateTransports rejects bindings that cannot name one of this transition's ports.
+func (t AtomicTransition) ValidateTransports() error {
+	for direction, names := range [][]string{t.InputPorts, t.OutputPorts} {
+		bindings := t.InputTransports
+		if direction == 1 {
+			bindings = t.OutputTransports
+		}
+		known := map[string]bool{}
+		for _, n := range names {
+			known[n] = true
+		}
+		for p, transport := range bindings {
+			if !known[p] || transport == "" || strings.ContainsAny(transport, " \t\r\n\x00") {
+				return fmt.Errorf("%s: invalid transport %q for port %q", t.Name, transport, p)
+			}
+		}
+	}
+	return nil
+}
+
+func cloneTransports(in map[string]string) map[string]string {
+	var out map[string]string
+	for p, t := range in {
+		if t != "memory" {
+			if out == nil {
+				out = map[string]string{}
+			}
+			out[p] = t
+		}
+	}
+	return out
 }

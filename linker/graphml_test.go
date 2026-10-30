@@ -415,9 +415,9 @@ func TestGraphMLUsesExistingComposition(t *testing.T) {
 	if _, err := CanonicalYAML(g); err != nil {
 		t.Fatal(err)
 	}
-	// Remapped endpoint basenames that differ from preserved local ports cannot be exported losslessly.
+	// Explicit YAML ports preserve remapped endpoint basenames.
 	g.Transitions[0].InputPorts[0] = "renamed"
-	if _, err := CanonicalYAML(g); err == nil {
-		t.Fatal("lossy port export accepted")
+	if data, err := CanonicalYAML(g); err != nil || !strings.Contains(string(data), "port: renamed") {
+		t.Fatalf("port export: %s, %v", data, err)
 	}
 }

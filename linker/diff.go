@@ -23,6 +23,7 @@ type Value struct {
 	Timeout        time.Duration     `json:"timeout,omitempty"`
 	From           string            `json:"from,omitempty"`
 	To             string            `json:"to,omitempty"`
+	Transport      string            `json:"transport,omitempty"`
 	Port           string            `json:"port,omitempty"`
 }
 type Change struct {
@@ -98,6 +99,9 @@ func diffIndex(r Result) (map[string]diffElement, error) {
 		}
 	}
 	for _, t := range r.Graph.Transitions {
+		if err := t.ValidateTransports(); err != nil {
+			return nil, err
+		}
 		for direction, endpoints := range [][]string{t.Inputs, t.Outputs} {
 			ports := t.InputPorts
 			if direction == 1 {
@@ -124,7 +128,7 @@ func diffIndex(r Result) (map[string]diffElement, error) {
 				if direction == 1 {
 					from, to = t.Name, p
 				}
-				if err := add(from+" -> "+to, "arc", Value{From: from, To: to, Port: local}, t.Sources); err != nil {
+				if err := add(from+" -> "+to, "arc", Value{From: from, To: to, Port: local, Transport: arcTransport(t, direction, local)}, t.Sources); err != nil {
 					return nil, err
 				}
 			}
@@ -328,4 +332,15 @@ func (r Report) WriteText(w io.Writer, before, after string) error {
 	}
 	_, err := io.WriteString(w, s.String())
 	return err
+}
+
+func arcTransport(t meshwork.AtomicTransition, direction int, p string) string {
+	bindings := t.InputTransports
+	if direction == 1 {
+		bindings = t.OutputTransports
+	}
+	if bindings[p] == "memory" {
+		return ""
+	}
+	return bindings[p]
 }

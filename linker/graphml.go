@@ -313,7 +313,7 @@ func parseGraphML(f File) (_ *source, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &source{File: f, NS: ns, Doc: document{Places: map[string]string{}, Transitions: map[string]transition{}}, Imported: &GraphMLDocument{Filename: f.Path, XML: string(b), Nodes: map[string]VisualNode{}}}
+	s := &source{File: f, NS: ns, Doc: document{Places: map[string]placeType{}, Transitions: map[string]transition{}}, Imported: &GraphMLDocument{Filename: f.Path, XML: string(b), Nodes: map[string]VisualNode{}}}
 	ids := map[string]bool{}
 	nodeIDs := map[string]bool{}
 	identities := map[string]string{}
@@ -421,11 +421,11 @@ func parseGraphML(f File) (_ *source, err error) {
 							return fmt.Errorf("node %s: place cannot declare transition properties", id)
 						}
 						old := s.Doc.Places[name]
-						if old != "" && sp.Type != "" && old != sp.Type {
+						if old != "" && sp.Type != "" && string(old) != sp.Type {
 							return fmt.Errorf("node %s: conflicting type for %s", id, name)
 						}
 						if sp.Type != "" || old == "" {
-							s.Doc.Places[name] = sp.Type
+							s.Doc.Places[name] = placeType(sp.Type)
 						}
 					} else {
 						if sp.Type != "" {
@@ -533,7 +533,7 @@ func parseGraphML(f File) (_ *source, err error) {
 			if e.attr("sourceport") != "" || e.attr("targetport") != "" {
 				return nil, fmt.Errorf("edge %s: GraphML ports are unsupported", id)
 			}
-			s.Doc.Arcs = append(s.Doc.Arcs, []string{from, to})
+			s.Doc.Arcs = append(s.Doc.Arcs, arcSpec{From: from, To: to})
 			s.Imported.ArcIDs = append(s.Imported.ArcIDs, id)
 			prov.Identity = from + " -> " + to
 		}
@@ -580,36 +580,37 @@ func CanonicalJSON(g meshwork.ExecutableGraph) ([]byte, error) {
 
 // CanonicalYAML emits resolved names, so import context cannot change identity.
 func CanonicalYAML(g meshwork.ExecutableGraph) ([]byte, error) {
+	if _, err := diffIndex(Result{Graph: g}); err != nil {
+		return nil, err
+	}
 	d := struct {
 		Namespace   string                `yaml:"namespace"`
 		Places      map[string]string     `yaml:"places"`
 		Transitions map[string]transition `yaml:"transitions"`
-		Arcs        [][]string            `yaml:"arcs"`
+		Arcs        []arcSpec             `yaml:"arcs"`
 		References  []reference           `yaml:"references,omitempty"`
 	}{Namespace: "/", Places: map[string]string{}, Transitions: map[string]transition{}}
 	for _, p := range g.Places {
 		d.Places[p.Name] = p.Type
 	}
 	for _, t := range g.Transitions {
-		for _, direction := range []struct{ Places, Ports []string }{{t.Inputs, t.InputPorts}, {t.Outputs, t.OutputPorts}} {
-			if len(direction.Places) != len(direction.Ports) {
-				return nil, fmt.Errorf("%s: invalid port mapping", t.Name)
-			}
-			for i, p := range direction.Places {
-				if port(p) != direction.Ports[i] {
-					return nil, fmt.Errorf("%s: YAML export cannot preserve remapped local port %s", t.Name, direction.Ports[i])
-				}
-			}
-		}
 		d.Transitions[t.Name] = transition{Implementation: t.Implementation, Timeout: duration(t.Timeout)}
-		for _, p := range t.Inputs {
-			d.Arcs = append(d.Arcs, []string{p, t.Name})
+		for i, p := range t.Inputs {
+			name := port(p)
+			if len(t.InputPorts) > 0 {
+				name = t.InputPorts[i]
+			}
+			d.Arcs = append(d.Arcs, arcSpec{From: p, To: t.Name, Port: name, Transport: t.InputTransports[name]})
 		}
-		for _, p := range t.Outputs {
-			d.Arcs = append(d.Arcs, []string{t.Name, p})
+		for i, p := range t.Outputs {
+			name := port(p)
+			if len(t.OutputPorts) > 0 {
+				name = t.OutputPorts[i]
+			}
+			d.Arcs = append(d.Arcs, arcSpec{From: t.Name, To: p, Port: name, Transport: t.OutputTransports[name]})
 		}
 	}
-	sort.Slice(d.Arcs, func(i, j int) bool { return strings.Join(d.Arcs[i], "\x00") < strings.Join(d.Arcs[j], "\x00") })
+	sort.Slice(d.Arcs, func(i, j int) bool { return d.Arcs[i].From+"\x00"+d.Arcs[i].To < d.Arcs[j].From+"\x00"+d.Arcs[j].To })
 	for _, ref := range g.References {
 		d.References = append(d.References, reference{Graph: ref.Graph, Namespace: ref.Namespace, Bindings: ref.Bindings})
 	}

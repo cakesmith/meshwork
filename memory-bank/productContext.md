@@ -15,3 +15,9 @@ Runtime execution consumes tokens; explicit duplication provides fan-out. Output
 Manual scenarios process due work and runnable transitions before assertions. Steps can inspect actual marking at 29, 30 and 31 seconds without waiting for elapsed wall time. Each transition fires at most once; the last explicit step stops the run and releases pending reservations. Default error handling and broader scheduling remain product decisions.
 
 For shell/process composition, the persistent adapter treats graph topology as its boundary: source places are writable ingress and sink places are drained egress. NDJSON frames identify the selected place and JSON value. A parent process owns service lifetime; EOF leaves the session running and no network listener is implied.
+
+## Proposed plugin sharing workflow (2026-10-30)
+Select graph sources independently from explicitly selected plugin exports. A host links the graph and binds its logical effect identities to shareable plugins without linking the plugin author's application graph. This is a target design; current execution still uses a Go registry.
+
+## Current distributed workflow (2026-10-30)
+Author named transition ports and arc transports in graph files, select executor binaries separately in a deployment, start the executors, then run the chosen scenarios through one authority. The authority owns committed places while executors exchange typed proposed values. A native consumer and remote producer can share one logical place. Existing shorthand graphs and native runs remain supported.

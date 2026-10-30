@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	distributed "example.com/meshwork-prototype/examples/distributed"
 	"example.com/meshwork-prototype/linker"
 	"example.com/meshwork-prototype/plugins"
+	"example.com/meshwork-prototype/plugins/remote"
 )
 
 type repositories []linker.Repository
@@ -54,6 +56,10 @@ func scenarioRepositoryRoot(scenario string) (string, error) {
 func run(args []string, out io.Writer) error { return runInput(args, os.Stdin, out) }
 
 func runInput(args []string, in io.Reader, out io.Writer) error {
+	return runInputContext(context.Background(), args, in, out)
+}
+
+func runInputContext(ctx context.Context, args []string, in io.Reader, out io.Writer) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: meshwork discover|link|validate|import [options] [ROOT|FILE ...]; meshwork execute --scenario FILE [options]; meshwork diff BEFORE AFTER [--format text|json] [--yed]")
 	}
@@ -74,13 +80,14 @@ func runInput(args []string, in io.Reader, out io.Writer) error {
 	yed := flags.Bool("yed", false, "infer computational kinds from yEd ellipse/rectangle and names from labels")
 	format := flags.String("format", "", "canonical link/import output: json or yaml (import defaults to summary)")
 	scenario := flags.String("scenario", "", "scenario source file to execute")
+	deployment := flags.String("deployment", "", "executor deployment file for execute")
 	// Permit flags after a filename as well as before it.
 	var options, positional []string
 	for i := 1; i < len(args); i++ {
 		a := args[i]
 		if strings.HasPrefix(a, "-") {
 			options = append(options, a)
-			if !strings.Contains(a, "=") && (a == "-repo" || a == "--repo" || a == "-namespace" || a == "--namespace" || a == "-graphml-root" || a == "--graphml-root" || a == "-format" || a == "--format" || a == "-scenario" || a == "--scenario") && i+1 < len(args) {
+			if !strings.Contains(a, "=") && (a == "-repo" || a == "--repo" || a == "-namespace" || a == "--namespace" || a == "-graphml-root" || a == "--graphml-root" || a == "-format" || a == "--format" || a == "-scenario" || a == "--scenario" || a == "-deployment" || a == "--deployment") && i+1 < len(args) {
 				i++
 				options = append(options, args[i])
 			}
@@ -96,6 +103,9 @@ func runInput(args []string, in io.Reader, out io.Writer) error {
 	}
 	if command == "execute" && *scenario == "" {
 		return fmt.Errorf("execute requires --scenario FILE")
+	}
+	if *deployment != "" && command != "execute" {
+		return fmt.Errorf("--deployment is only valid for execute")
 	}
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
@@ -239,7 +249,22 @@ func runInput(args []string, in io.Reader, out io.Writer) error {
 				continue
 			}
 			matched = true
-			if err := plugins.ExecuteScenario(context.Background(), plugins.ExecutionRequest{Graph: result.Definitions[s.Graph], Scenario: s, Implementations: distributed.Implementations(), Input: in, Output: out}, plugins.BuiltIns()...); err != nil {
+			request := plugins.ExecutionRequest{Graph: result.Definitions[s.Graph], Scenario: s, Implementations: distributed.Implementations(), Input: in, Output: out}
+			if err := func() error {
+				if *deployment != "" {
+					config, err := remote.LoadDeployment(*deployment)
+					if err != nil {
+						return err
+					}
+					authority, err := remote.Prepare(ctx, request.Graph, config, request.Implementations)
+					if err != nil {
+						return err
+					}
+					defer authority.Close()
+					request.NewRuntime = authority.NewRuntime
+				}
+				return plugins.ExecuteScenario(ctx, request, plugins.BuiltIns()...)
+			}(); err != nil {
 				return err
 			}
 		}
@@ -252,7 +277,9 @@ func runInput(args []string, in io.Reader, out io.Writer) error {
 }
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout); err != nil {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+	if err := runInputContext(ctx, os.Args[1:], os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

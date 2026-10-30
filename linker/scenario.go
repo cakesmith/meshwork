@@ -195,16 +195,21 @@ func (s Scenario) ResolveInput(name string) (string, error) {
 // RunScenario runs a finite example on an isolated marking. Each transition fires
 // once; cyclic/reactive graphs require a future explicit scheduling policy.
 func RunScenario(ctx context.Context, g meshwork.ExecutableGraph, s Scenario, impl map[string]meshwork.Compute) (*meshwork.Runtime, error) {
+	return RunScenarioWithRuntime(ctx, g, s, func(clock meshwork.Clock) (*meshwork.Runtime, error) { return g.InstantiateWithClock(impl, clock) })
+}
+
+// RunScenarioWithRuntime executes against a host-supplied runtime factory.
+func RunScenarioWithRuntime(ctx context.Context, g meshwork.Graph, s Scenario, instantiate func(meshwork.Clock) (*meshwork.Runtime, error)) (*meshwork.Runtime, error) {
 	if err := validateClock(s.Clock); err != nil {
 		return nil, err
 	}
 	if s.Clock.Type == "manual" {
-		return runManualScenario(ctx, g, s, impl)
+		return runManualScenario(ctx, g, s, instantiate)
 	}
 	if len(s.Steps) > 0 {
 		return nil, fmt.Errorf("scenario steps require a manual clock")
 	}
-	r, err := g.Instantiate(impl)
+	r, err := instantiate(meshwork.RealClock{})
 	if err != nil {
 		return nil, err
 	}
@@ -283,10 +288,10 @@ func expectationsReady(r *meshwork.Runtime, values map[string]meshwork.Token) bo
 	return true
 }
 
-func runManualScenario(parent context.Context, g meshwork.Graph, s Scenario, impl map[string]meshwork.Compute) (*meshwork.Runtime, error) {
+func runManualScenario(parent context.Context, g meshwork.Graph, s Scenario, instantiate func(meshwork.Clock) (*meshwork.Runtime, error)) (*meshwork.Runtime, error) {
 	ctx, cancel := context.WithCancel(parent)
 	clock := meshwork.NewManualClock(time.Unix(0, 0).Add(s.Clock.Start))
-	r, err := g.InstantiateWithClock(impl, clock)
+	r, err := instantiate(clock)
 	if err != nil {
 		cancel()
 		return nil, err

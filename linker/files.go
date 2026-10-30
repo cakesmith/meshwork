@@ -235,9 +235,9 @@ type document struct {
 	Steps       []scenarioStep        `yaml:"steps"`
 	Namespace   string                `yaml:"namespace"`
 	Bindings    map[string]string     `yaml:"bindings"`
-	Places      map[string]string     `yaml:"places"`
+	Places      map[string]placeType  `yaml:"places"`
 	Transitions map[string]transition `yaml:"transitions"`
-	Arcs        [][]string            `yaml:"arcs"`
+	Arcs        []arcSpec             `yaml:"arcs"`
 	References  []reference           `yaml:"references"`
 	Graph       string                `yaml:"graph"`
 	Name        string                `yaml:"name"`

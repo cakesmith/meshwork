@@ -13,3 +13,9 @@ Finite scenarios with `expect` complete as soon as all expected places hold toke
 
 ## Exclusions and remaining decisions
 No GraphML XML rewriting/synchronization, cloud adapters, distributed scheduler, automatic retries/backoff, arbitrary promises, new vertex kinds, UI or Collator code. Default runtime error policy and final tie-breaking convention remain undecided. General cyclic/reactive scheduling, expected-failure scenario assertions, immutable revisions, numeric normalization and place-selection traversal remain future work.
+
+## Proposed direction (2026-10-30)
+All compiled components, including linker and runtime, should ultimately have language-independent plugin contracts. The proposed architecture is in `docs/plugin-architecture.md`; it does not yet change the current Go implementation or select a transport.
+
+## Implemented execution increment (2026-10-30)
+Explicit place/port authoring and arc transports now support a first single-authority remote execution path. Per-transition executor selection uses an explicit deployment, with native and HTTP/JSON executors; compiled effects can be shared without application graph files. Broader language-independent linker/runtime/observer contracts remain a target, and no durable/distributed authority is claimed.

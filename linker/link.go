@@ -14,7 +14,7 @@ type declaration struct {
 	Name, Kind, Type, Implementation, Source string
 	Timeout                                  time.Duration
 }
-type arc struct{ From, To, Port, Source string }
+type arc struct{ From, To, Port, Source, Transport string }
 type region struct {
 	Sources []*source
 }
@@ -135,7 +135,7 @@ func linkFiles(files []File, allowIncomplete bool) (Result, error) {
 				if err != nil {
 					return c, fmt.Errorf("%s: %w", s.loc("places", name), err)
 				}
-				addNode(declaration{Name: n, Kind: "place", Type: s.Doc.Places[name], Source: s.loc("places", name)}, name)
+				addNode(declaration{Name: n, Kind: "place", Type: string(s.Doc.Places[name]), Source: s.loc("places", name)}, name)
 			}
 			for _, name := range sortedKeys(s.Doc.Transitions) {
 				n, err := resolve(name)
@@ -150,14 +150,11 @@ func linkFiles(files []File, allowIncomplete bool) (Result, error) {
 				addNode(declaration{Name: n, Kind: "transition", Implementation: impl, Timeout: time.Duration(t.Timeout), Source: s.loc("transitions", name)}, name)
 			}
 			for index, a := range s.Doc.Arcs {
-				if len(a) != 2 {
-					return c, fmt.Errorf("%s: arc must have two endpoints: %v", s.loc("arcs", ""), a)
-				}
-				from, err := resolve(a[0])
+				from, err := resolve(a.From)
 				if err != nil {
 					return c, fmt.Errorf("%s: %w", s.loc("arcs", ""), err)
 				}
-				to, err := resolve(a[1])
+				to, err := resolve(a.To)
 				if err != nil {
 					return c, fmt.Errorf("%s: %w", s.loc("arcs", ""), err)
 				}
@@ -166,7 +163,11 @@ func linkFiles(files []File, allowIncomplete bool) (Result, error) {
 				if s.Imported != nil {
 					location = s.File.Path + "#" + s.Imported.ArcIDs[index]
 				}
-				c.Arcs = append(c.Arcs, arc{From: from, To: to, Port: port(from) + "\x00" + port(to), Source: location})
+				local := a.Port
+				if local == "" {
+					local = port(from) + "\x00" + port(to)
+				}
+				c.Arcs = append(c.Arcs, arc{From: from, To: to, Port: local, Source: location, Transport: a.Transport})
 			}
 			for _, ref := range s.Doc.References {
 				location := s.loc("references", "")
@@ -403,24 +404,37 @@ func canonical(c contribution, allowIncomplete bool) (meshwork.ExecutableGraph, 
 		pp := strings.Split(a.Port, "\x00")
 		key := a.From + "\x00" + a.To
 		p := pp[0]
-		if from.Kind == "transition" {
+		if from.Kind == "transition" && len(pp) == 2 {
 			p = pp[1]
 		}
 		if old, ok := seen[key]; ok {
-			if old != p {
-				problems = append(problems, fmt.Errorf("%s: conflicting ports for arc %s -> %s: %s versus %s", a.Source, a.From, a.To, old, p))
+			if old != p+"\x00"+effectiveTransport(a.Transport) {
+				oldPort, oldTransport, _ := strings.Cut(old, "\x00")
+				problems = append(problems, fmt.Errorf("%s: conflicting ports/transports for arc %s -> %s: {%q, %q} versus {%q, %q}", a.Source, a.From, a.To, oldPort, oldTransport, p, effectiveTransport(a.Transport)))
 			}
 			continue
 		}
-		seen[key] = p
+		seen[key] = p + "\x00" + effectiveTransport(a.Transport)
 		if from.Kind == "place" {
 			t := ts[a.To]
 			t.Inputs = append(t.Inputs, a.From)
 			t.InputPorts = append(t.InputPorts, p)
+			if effectiveTransport(a.Transport) != "memory" {
+				if t.InputTransports == nil {
+					t.InputTransports = map[string]string{}
+				}
+				t.InputTransports[p] = a.Transport
+			}
 		} else {
 			t := ts[a.From]
 			t.Outputs = append(t.Outputs, a.To)
 			t.OutputPorts = append(t.OutputPorts, p)
+			if effectiveTransport(a.Transport) != "memory" {
+				if t.OutputTransports == nil {
+					t.OutputTransports = map[string]string{}
+				}
+				t.OutputTransports[p] = a.Transport
+			}
 		}
 	}
 	for _, name := range sortedKeys(ts) {
@@ -471,4 +485,11 @@ func diagnostics(es []error) error {
 	sort.Strings(ss)
 	ss = dedup(ss)
 	return errors.New(strings.Join(ss, "\n"))
+}
+
+func effectiveTransport(s string) string {
+	if s == "" {
+		return "memory"
+	}
+	return s
 }

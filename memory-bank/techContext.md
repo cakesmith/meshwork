@@ -1,5 +1,8 @@
 # Technical Context
 
+## Implementation milestone (2026-10-30)
+Implement explicit place/port YAML and arc transport bindings, plus a standard-library HTTP/JSON executor transport. Deployment configuration supplies authority listen/advertise endpoints, named executors and transition overrides. Keep code/dependency/runtime versions unchanged. Preserve existing native scenarios. Remote manual-clock/capability operations are unsupported and must fail explicitly; network execution is a single-authority, non-durable foundation, not distributed consensus. Validate bounded protocol messages, cancellation, invalid/late outputs and unchanged marking on failure.
+
 ## Verified stack
 - Module example.com/meshwork-prototype; Go baseline 1.23 in go.mod.
 - Installed Go 1.27.3 windows/amd64, verified 2026-10-29.
@@ -20,11 +23,11 @@ A singular scenario with an `expect` block is finite: execution ends when all ex
 
 When `execute --scenario FILE` has no positional root or `--repo`, the CLI walks upward from FILE and uses the nearest directory containing `meshwork.repositories.yaml` as its root. This is limited to a declared boundary; projects without that manifest still provide an explicit root or repository flags.
 
-`meshwork` contains no shipped Boolean implementation registry. The distributed consumer example supplies `logic.nand.go` and `logic.duplicate.go`; the demo links its YAML and uses that example's registry. Core tests use private `_test.go` fixtures.
+`meshwork` contains no shipped Boolean implementation registry. The distributed consumer example supplies `logic.nand.go` and `logic.duplicate.go`; finite scenario execution uses that example's registry through the CLI. Core tests use private `_test.go` fixtures.
 
 Graph transition timeout uses a nonnegative Go duration string or infinite; omission/0s means infinite. Canonical JSON finite durations are integer nanoseconds and zero is omitted. Canonical YAML exports finite timeouts, but rejects local port remappings it cannot retain. Conflicting declarations must agree on effective timeout, including the default.
 
-Scenario clock type is real (default) or manual, with nonnegative finite start offset from Unix epoch. Manual-only steps contain one finite nonnegative advance_clock or expect. Step states empty/present check actual marking; other values are typed token expectations. A collection may supply a default clock. Existing top-level expect keeps value semantics. Runtime failure still fails a scenario; explicit expected-failure syntax remains future work. CLI validates only; RunScenario executes.
+Scenario clock type is real (default) or manual, with nonnegative finite start offset from Unix epoch. Manual-only steps contain one finite nonnegative advance_clock or expect. Step states empty/present check actual marking; other values are typed token expectations. A collection may supply a default clock. Existing top-level expect keeps value semantics. Runtime failure still fails a scenario; explicit expected-failure syntax remains future work. CLI validate checks declarations; CLI execute delegates through scenario plugins.
 
 Clock interface uses Now and NewTimer with stoppable timers; both clocks also expose After. Manual scenario work uses WaitClock/Settle and no sleeps. Test wall-time contexts are watchdogs only. Runtime contexts cancel on finalized expiry without pretending a manual clock is a wall-clock context deadline.
 
@@ -37,7 +40,6 @@ $env:GOMODCACHE = Join-Path (Get-Location) '.cache/go-mod'
 go test ./...
 go vet ./...
 go test -race ./...
-go run ./examples/distributed/demo
 go run ./cmd/meshwork validate ./examples/distributed/primitives ./examples/distributed/composites
 go run ./cmd/meshwork validate ./examples/timing
 go run ./cmd/meshwork diff ./linker/testdata/graphml/graph.nand.graphml ./linker/testdata/graphml/graph.nand.meshwork.yaml
@@ -45,3 +47,20 @@ git diff --check
 ```
 
 Baseline full tests passed before changes. Full tests also pass after the new clock/scenario/supervision regressions; final validation is recorded in activeContext.md. Docs: README.md, docs/linker.md, docs/timing.md. Examples: existing distributed NAND/OR/MUX and new examples/timing timeout/infinite scenarios.
+
+## Plugin package composition (2026-10-30)
+- Share scenario plugins as ordinary Go packages explicitly imported by a host; no dynamic loader or source discovery. The CLI composes built-in executor packages separately from the distributed example registry. Scenario schema and graph repository linking do not load plugin code.
+
+## Proposed portable contracts (2026-10-30)
+- `docs/plugin-architecture.md` is a transport-neutral target only: linker, runtime, effects, executors and observers are replaceable compiled plugins. Current Go APIs and explicit registry remain implemented and unchanged. Portable token encoding/hash and numeric rules, protocol versions, capabilities, error/cancellation semantics, plugin binding/distribution, transport and bootstrap are not yet specified or implemented.
+
+## Proposed per-transition execution (2026-10-30)
+- Target executors are selected per transition from compiled binaries, with a default and overrides; arc-associated transports connect transition output and input ports through a place. No executable format, wire protocol, source schema, locality optimization, distributed runtime or negotiation is implemented. See `docs/plugin-architecture.md` for unsettled ownership and failure semantics.
+
+## Proposed place authority (2026-10-30)
+- `docs/place.md` describes one logical authority per graph instance, including place state and atomic multi-place firing. No distributed transport, durable recovery or place protocol exists yet; byte placement and authority failure behavior remain undecided.
+
+## Current remote transport and configuration (2026-10-30)
+- `meshwork execute --scenario FILE --deployment FILE ROOT` binds a selected graph using an explicit deployment YAML. Native executors retain the caller's registry; HTTP/JSON executors export their own effects. The compiled example is `go build -o executor.exe ./examples/distributed/executor`; `examples/remote/executor.py` is an independent standard-library peer.
+- Protocol `meshwork.executor.v1`: authenticated GET /capabilities and POST /execute; ephemeral input capability GET URLs; typed JSON values with authority-computed hashes. 4 MiB messages, correlation checks, no redirects/retries. Default listener is loopback/ephemeral; cross-machine use requires explicit reachable authority advertise URL. HTTP listeners require a trusted private network or external TLS termination.
+- Go packages/dependencies unchanged. Remote effects require real clocks; native timing/manual clock behavior remains. Example and exact commands are in `docs/remote-execution.md`.
