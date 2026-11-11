@@ -1,4 +1,4 @@
-module example.com/meshwork-prototype
+module github.com/cakesmith/meshwork
 
 go 1.23
 

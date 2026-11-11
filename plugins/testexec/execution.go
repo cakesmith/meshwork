@@ -3,8 +3,8 @@ package testexec
 
 import (
 	"context"
-	"example.com/meshwork-prototype/linker"
-	"example.com/meshwork-prototype/plugins/api"
+	"github.com/cakesmith/meshwork/linker"
+	"github.com/cakesmith/meshwork/plugins/api"
 	"fmt"
 )
 

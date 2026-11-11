@@ -13,10 +13,10 @@ import (
     "context"
     "os"
 
-    "example.com/meshwork-prototype/examples/plugins/report"
-    "example.com/meshwork-prototype/plugins/api"
-    "example.com/meshwork-prototype/plugins/streamexec"
-    "example.com/meshwork-prototype/plugins/testexec"
+    "github.com/cakesmith/meshwork/examples/plugins/report"
+    "github.com/cakesmith/meshwork/plugins/api"
+    "github.com/cakesmith/meshwork/plugins/streamexec"
+    "github.com/cakesmith/meshwork/plugins/testexec"
 )
 
 // request contains the host's linked graph, scenario, implementations and I/O.

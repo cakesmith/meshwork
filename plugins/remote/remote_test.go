@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/meshwork-prototype/meshwork"
+	"github.com/cakesmith/meshwork/meshwork"
 )
 
 func testGraph() meshwork.Graph {

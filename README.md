@@ -70,7 +70,19 @@ $env:GOMODCACHE = Join-Path (Get-Location) '.cache/go-mod'
 
 ## How Meshwork works
 
-Graphs define places, transitions, and references to other graphs; scenarios supply inputs and expectations; consuming applications supply the Go implementations. Read the [Meshwork overview](docs/overview.md) for the model and runtime, [distributed authoring and CLI reference](docs/linker.md) for graph files and commands, and [clocks and timeouts](docs/timing.md) for timed execution, and [sharing scenario plugins](docs/plugins.md) for plugin authoring.
+Graphs define places, transitions, and references to other graphs. Scenarios supply inputs and expectations. Execution bindings connect transitions to Go functions, local commands, or remote executors. Read the [Meshwork overview](docs/overview.md) for the model and runtime, the [CLI reference](docs/linker.md) for graph files and commands, and [clocks and timeouts](docs/timing.md) for timed execution.
+
+## Use Meshwork in another repository
+
+Install the standalone CLI with Go 1.23 or later.
+
+```sh
+go install github.com/cakesmith/meshwork/cmd/meshwork@REVISION
+```
+
+Use a commit or tag containing the `github.com/cakesmith/meshwork` module path. From an existing checkout at that revision, `go install ./cmd/meshwork` builds the same command.
+
+Consumer repositories can bind their own commands through YAML and run them with `meshwork execute`. See [local subprocess execution](docs/subprocess.md) for file staging, artifact digests, and a binding example.
 
 ## Remote transition executors
 

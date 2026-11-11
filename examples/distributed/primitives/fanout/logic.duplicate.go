@@ -3,7 +3,7 @@ package fanout
 import (
 	"context"
 
-	"example.com/meshwork-prototype/meshwork"
+	"github.com/cakesmith/meshwork/meshwork"
 )
 
 // Duplicate implements the adjacent graph.duplicate.meshwork.yaml transition.

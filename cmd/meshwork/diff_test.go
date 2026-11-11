@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"example.com/meshwork-prototype/linker"
+	"github.com/cakesmith/meshwork/linker"
 )
 
 func TestDiffCommands(t *testing.T) {

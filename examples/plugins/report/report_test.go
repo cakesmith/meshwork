@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"example.com/meshwork-prototype/examples/plugins/report"
-	"example.com/meshwork-prototype/linker"
-	"example.com/meshwork-prototype/plugins/api"
-	"example.com/meshwork-prototype/plugins/streamexec"
-	"example.com/meshwork-prototype/plugins/testexec"
+	"github.com/cakesmith/meshwork/examples/plugins/report"
+	"github.com/cakesmith/meshwork/linker"
+	"github.com/cakesmith/meshwork/plugins/api"
+	"github.com/cakesmith/meshwork/plugins/streamexec"
+	"github.com/cakesmith/meshwork/plugins/testexec"
 )
 
 type executor struct{ err error }

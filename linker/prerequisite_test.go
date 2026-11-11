@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	distributed "example.com/meshwork-prototype/examples/distributed"
-	"example.com/meshwork-prototype/meshwork"
+	distributed "github.com/cakesmith/meshwork/examples/distributed"
+	"github.com/cakesmith/meshwork/meshwork"
 )
 
 func TestIndependentDiscoveryUnifies(t *testing.T) {

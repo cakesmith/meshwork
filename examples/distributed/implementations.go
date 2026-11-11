@@ -2,9 +2,9 @@
 package distributed
 
 import (
-	"example.com/meshwork-prototype/examples/distributed/primitives/fanout"
-	"example.com/meshwork-prototype/examples/distributed/primitives/implementation"
-	"example.com/meshwork-prototype/meshwork"
+	"github.com/cakesmith/meshwork/examples/distributed/primitives/fanout"
+	"github.com/cakesmith/meshwork/examples/distributed/primitives/implementation"
+	"github.com/cakesmith/meshwork/meshwork"
 )
 
 // Implementations binds the example's adjacent transition source files for execution.

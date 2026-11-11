@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"example.com/meshwork-prototype/meshwork"
+	"github.com/cakesmith/meshwork/meshwork"
 	"gopkg.in/yaml.v3"
 )
 
