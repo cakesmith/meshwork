@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	distributed "example.com/meshwork-prototype/examples/distributed"
-	"example.com/meshwork-prototype/plugins/remote"
+	distributed "github.com/cakesmith/meshwork/examples/distributed"
+	"github.com/cakesmith/meshwork/plugins/remote"
 )
 
 func TestExecuteRemoteScenario(t *testing.T) {

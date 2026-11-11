@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"example.com/meshwork-prototype/linker"
-	"example.com/meshwork-prototype/meshwork"
-	"example.com/meshwork-prototype/plugins/api"
-	"example.com/meshwork-prototype/plugins/remote"
-	"example.com/meshwork-prototype/plugins/streamexec"
+	"github.com/cakesmith/meshwork/linker"
+	"github.com/cakesmith/meshwork/meshwork"
+	"github.com/cakesmith/meshwork/plugins/api"
+	"github.com/cakesmith/meshwork/plugins/remote"
+	"github.com/cakesmith/meshwork/plugins/streamexec"
 )
 
 type frames chan []byte

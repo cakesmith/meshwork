@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"example.com/meshwork-prototype/meshwork"
+	"github.com/cakesmith/meshwork/meshwork"
 )
 
 type Scenario struct {

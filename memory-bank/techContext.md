@@ -4,7 +4,7 @@
 Implement explicit place/port YAML and arc transport bindings, plus a standard-library HTTP/JSON executor transport. Deployment configuration supplies authority listen/advertise endpoints, named executors and transition overrides. Keep code/dependency/runtime versions unchanged. Preserve existing native scenarios. Remote manual-clock/capability operations are unsupported and must fail explicitly; network execution is a single-authority, non-durable foundation, not distributed consensus. Validate bounded protocol messages, cancellation, invalid/late outputs and unchanged marking on failure.
 
 ## Verified stack
-- Module example.com/meshwork-prototype; Go baseline 1.23 in go.mod.
+- Module github.com/cakesmith/meshwork; Go baseline 1.23 in go.mod.
 - Installed Go 1.27.3 windows/amd64, verified 2026-10-29.
 - Go modules with direct pinned gopkg.in/yaml.v3 v3.0.1; kernel/composition use standard library. No new dependency or runtime version changes.
 - Windows PowerShell; gcc is available for race detection.

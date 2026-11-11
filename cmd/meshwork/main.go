@@ -12,10 +12,11 @@ import (
 	"sort"
 	"strings"
 
-	distributed "example.com/meshwork-prototype/examples/distributed"
-	"example.com/meshwork-prototype/linker"
-	"example.com/meshwork-prototype/plugins"
-	"example.com/meshwork-prototype/plugins/remote"
+	distributed "github.com/cakesmith/meshwork/examples/distributed"
+	"github.com/cakesmith/meshwork/linker"
+	"github.com/cakesmith/meshwork/plugins"
+	"github.com/cakesmith/meshwork/plugins/remote"
+	"github.com/cakesmith/meshwork/plugins/subprocess"
 )
 
 type repositories []linker.Repository
@@ -81,15 +82,19 @@ func runInputContext(ctx context.Context, args []string, in io.Reader, out io.Wr
 	format := flags.String("format", "", "canonical link/import output: json or yaml (import defaults to summary)")
 	scenario := flags.String("scenario", "", "scenario source file to execute")
 	deployment := flags.String("deployment", "", "executor deployment file for execute")
+	processFile := flags.String("subprocess", "", "local subprocess bindings file for execute")
 	// Permit flags after a filename as well as before it.
 	var options, positional []string
 	for i := 1; i < len(args); i++ {
 		a := args[i]
 		if strings.HasPrefix(a, "-") {
 			options = append(options, a)
-			if !strings.Contains(a, "=") && (a == "-repo" || a == "--repo" || a == "-namespace" || a == "--namespace" || a == "-graphml-root" || a == "--graphml-root" || a == "-format" || a == "--format" || a == "-scenario" || a == "--scenario" || a == "-deployment" || a == "--deployment") && i+1 < len(args) {
-				i++
-				options = append(options, args[i])
+			if i+1 < len(args) {
+				switch strings.TrimLeft(a, "-") {
+				case "repo", "namespace", "graphml-root", "format", "scenario", "deployment", "subprocess":
+					i++
+					options = append(options, args[i])
+				}
 			}
 		} else {
 			positional = append(positional, a)
@@ -106,6 +111,9 @@ func runInputContext(ctx context.Context, args []string, in io.Reader, out io.Wr
 	}
 	if *deployment != "" && command != "execute" {
 		return fmt.Errorf("--deployment is only valid for execute")
+	}
+	if *processFile != "" && (command != "execute" || *deployment != "") {
+		return fmt.Errorf("--subprocess is only valid for execute without --deployment")
 	}
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
@@ -243,13 +251,31 @@ func runInputContext(ctx context.Context, args []string, in io.Reader, out io.Wr
 		if err != nil {
 			return err
 		}
+		var localProcess subprocess.Config
+		if *processFile != "" {
+			localProcess, err = subprocess.LoadConfig(*processFile)
+			if err != nil {
+				return err
+			}
+		}
 		matched := false
 		for _, s := range result.Scenarios {
 			if !strings.HasPrefix(s.Source, target+":") {
 				continue
 			}
 			matched = true
-			request := plugins.ExecutionRequest{Graph: result.Definitions[s.Graph], Scenario: s, Implementations: distributed.Implementations(), Input: in, Output: out}
+			graph := result.Definitions[s.Graph]
+			if *processFile != "" {
+				report, err := localProcess.Run(ctx, graph, s, os.Stderr)
+				if err != nil {
+					return err
+				}
+				if err := encoder.Encode(report); err != nil {
+					return err
+				}
+				continue
+			}
+			request := plugins.ExecutionRequest{Graph: graph, Scenario: s, Implementations: distributed.Implementations(), Input: in, Output: out}
 			if err := func() error {
 				if *deployment != "" {
 					config, err := remote.LoadDeployment(*deployment)

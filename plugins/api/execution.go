@@ -3,8 +3,8 @@ package api
 
 import (
 	"context"
-	"example.com/meshwork-prototype/linker"
-	"example.com/meshwork-prototype/meshwork"
+	"github.com/cakesmith/meshwork/linker"
+	"github.com/cakesmith/meshwork/meshwork"
 	"fmt"
 	"io"
 )

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"example.com/meshwork-prototype/meshwork"
+	"github.com/cakesmith/meshwork/meshwork"
 )
 
 type declaration struct {

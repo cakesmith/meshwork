@@ -3,7 +3,7 @@ package implementation
 import (
 	"context"
 
-	"example.com/meshwork-prototype/meshwork"
+	"github.com/cakesmith/meshwork/meshwork"
 )
 
 // NAND implements the adjacent graph.nand.meshwork.yaml transition.

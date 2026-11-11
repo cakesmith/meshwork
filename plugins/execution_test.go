@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"example.com/meshwork-prototype/linker"
-	"example.com/meshwork-prototype/meshwork"
+	"github.com/cakesmith/meshwork/linker"
+	"github.com/cakesmith/meshwork/meshwork"
 )
 
 type recordedExecutor struct{ calls *[]string }

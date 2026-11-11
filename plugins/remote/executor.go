@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"example.com/meshwork-prototype/meshwork"
+	"github.com/cakesmith/meshwork/meshwork"
 )
 
 // ExecutorHandler serves compiled effects without importing any application graph.

@@ -3,9 +3,9 @@ package plugins
 
 import (
 	"context"
-	"example.com/meshwork-prototype/plugins/api"
-	"example.com/meshwork-prototype/plugins/streamexec"
-	"example.com/meshwork-prototype/plugins/testexec"
+	"github.com/cakesmith/meshwork/plugins/api"
+	"github.com/cakesmith/meshwork/plugins/streamexec"
+	"github.com/cakesmith/meshwork/plugins/testexec"
 )
 
 type ExecutionRequest = api.ExecutionRequest

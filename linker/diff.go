@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"example.com/meshwork-prototype/meshwork"
+	"github.com/cakesmith/meshwork/meshwork"
 )
 
 // Value contains only canonical computational attributes. Arcs carry local port names.

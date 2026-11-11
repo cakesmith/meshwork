@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"example.com/meshwork-prototype/linker"
+	"github.com/cakesmith/meshwork/linker"
 )
 
 func runDiff(args []string, out io.Writer) error {

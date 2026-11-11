@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"example.com/meshwork-prototype/linker"
-	"example.com/meshwork-prototype/plugins/api"
+	"github.com/cakesmith/meshwork/linker"
+	"github.com/cakesmith/meshwork/plugins/api"
 )
 
 type Observer struct{ Output io.Writer }

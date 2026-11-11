@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"example.com/meshwork-prototype/meshwork"
+	"github.com/cakesmith/meshwork/meshwork"
 )
 
 func cloneResult(t *testing.T, r Result) Result {
